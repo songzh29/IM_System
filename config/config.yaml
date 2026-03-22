@@ -1,0 +1,22 @@
+server:
+  port: 8080
+  mode: "debug"
+
+mysql:
+  host: "localhost"
+  port: 3307
+  user: "root"
+  password: "123456"
+  dbname: "im_system"
+  max_open_conns: 100
+  max_idle_conns: 10
+
+
+redis:
+  host: "localhost"
+  port: 6379
+  password: ""
+
+jwt:
+  secret: "your-secret-key"
+  expire: 72  # 小时
