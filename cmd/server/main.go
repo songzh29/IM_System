@@ -6,16 +6,22 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"github.com/songzh29/IM_System/config"
-	mysqldb "github.com/songzh29/IM_System/pkg/mysqldb"
-	redisdb "github.com/songzh29/IM_System/pkg/redisdb"
+	"github.com/songzh29/IM_System/internal/handler"
+	mysqldb "github.com/songzh29/IM_System/pkg/mysql"
+	redisdb "github.com/songzh29/IM_System/pkg/redis"
 	"go.uber.org/zap"
 )
 
 func main() {
-
 	logger, err := zap.NewDevelopment()
 	if err != nil {
 		log.Fatalf("zap初始化失败: %v", err)
+	}
+
+	// ✅ 先初始化配置
+	err = config.Init()
+	if err != nil {
+		logger.Panic("配置初始化失败", zap.Error(err))
 	}
 
 	//mysql连接
@@ -31,16 +37,35 @@ func main() {
 	}
 
 	//gin连接
-	err = config.Init()
-	if err != nil {
-		logger.Panic("配置初始化失败", zap.Error(err))
-	}
-
 	r := gin.Default()
+	r.LoadHTMLGlob("../../template/*.html")
 
-	r.GET("/", func(ctx *gin.Context) {
-		ctx.JSON(200, gin.H{"msg": "hello world"})
-	})
+	public := r.Group("/public")
+	{
+		public.GET("/", func(ctx *gin.Context) {
+			ctx.JSON(200, gin.H{"msg": "hello!!"})
+		})
+
+		public.GET("/register", func(ctx *gin.Context) {
+			ctx.JSON(200, gin.H{"msg": "欢迎来到注册界面"})
+		})
+
+		public.GET("/login", func(ctx *gin.Context) {
+			ctx.JSON(200, gin.H{"msg": "欢迎来到登录界面"})
+		})
+
+		public.POST("/register", handler.Register)
+
+		public.POST("/login", handler.Login)
+
+	}
+	private := r.Group("/private")
+	private.Use(handler.AuthMiddleware())
+	{
+		private.POST("/profile", func(ctx *gin.Context) {
+			ctx.JSON(200, gin.H{"msg": "查看个人信息成功"})
+		})
+	}
 
 	serverPort := fmt.Sprintf(":%d", config.ConfigInfo.Server.Port)
 	err = r.Run(serverPort)
