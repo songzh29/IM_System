@@ -4,9 +4,11 @@ go 1.25.5
 
 require (
 	github.com/gin-gonic/gin v1.12.0
+	github.com/golang-jwt/jwt/v5 v5.3.1
 	github.com/redis/go-redis/v9 v9.18.0
 	github.com/spf13/viper v1.21.0
 	go.uber.org/zap v1.27.1
+	golang.org/x/crypto v0.48.0
 	gorm.io/driver/mysql v1.6.0
 	gorm.io/gorm v1.31.1
 )
@@ -53,7 +55,6 @@ require (
 	go.uber.org/multierr v1.10.0 // indirect
 	go.yaml.in/yaml/v3 v3.0.4 // indirect
 	golang.org/x/arch v0.22.0 // indirect
-	golang.org/x/crypto v0.48.0 // indirect
 	golang.org/x/net v0.51.0 // indirect
 	golang.org/x/sys v0.41.0 // indirect
 	golang.org/x/text v0.34.0 // indirect

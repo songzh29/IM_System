@@ -5,6 +5,7 @@ import (
 	"time"
 
 	"github.com/songzh29/IM_System/config"
+	"github.com/songzh29/IM_System/internal/model"
 	"gorm.io/driver/mysql"
 	"gorm.io/gorm"
 )
@@ -26,6 +27,7 @@ func Init() error {
 	if err != nil {
 		return err
 	}
+	DB.AutoMigrate(&model.User{})
 	sqlDB, _ := DB.DB()
 	sqlDB.SetMaxOpenConns(maxOpenConns)        // 最大连接数
 	sqlDB.SetMaxIdleConns(maxIdleConns)        // 最大空闲连接
