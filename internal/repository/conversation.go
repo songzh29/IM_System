@@ -8,7 +8,7 @@ import (
 	"gorm.io/gorm"
 )
 
-func CreatConversation(conv *model.Conversation) error {
+func CreateConversation(conv *model.Conversation) error {
 	result := mysqldb.DB.Create(conv)
 	return result.Error
 }

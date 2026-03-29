@@ -8,14 +8,15 @@ import (
 	"gorm.io/gorm"
 )
 
-func CreatMessage(msg *model.Message) error {
+func CreateMessage(msg *model.Message) error {
 	result := mysqldb.DB.Create(msg)
 	return result.Error
 }
 
+// userID是自己
 func GetUnreadMessages(userID uint, conversationID uint, lastReadMsgID uint) ([]model.Message, error) {
 	var unreadMsg []model.Message
-	result := mysqldb.DB.Where("sender_id = ? AND conversation_id = ? AND id > ?", userID, conversationID, lastReadMsgID).Find(&unreadMsg)
+	result := mysqldb.DB.Where("sender_id != ? AND conversation_id = ? AND id > ?", userID, conversationID, lastReadMsgID).Find(&unreadMsg)
 	if result.Error != nil {
 		if errors.Is(result.Error, gorm.ErrRecordNotFound) {
 			return nil, nil // 无未读消息

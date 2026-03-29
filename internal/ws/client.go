@@ -86,11 +86,11 @@ func (c *Client) ListenMsg() {
 }
 
 // 假设从websocket发过来的数据全是JSON
-func (c *Client) DeliverMsg() {
-	for msg := range c.Send {
-		err := c.Conn.WriteMessage(websocket.TextMessage, msg)
-		if err != nil {
-			return
-		}
-	}
-}
+// func (c *Client) DeliverMsg() {
+// 	for msg := range c.Send {
+// 		err := c.Conn.WriteMessage(websocket.TextMessage, msg)
+// 		if err != nil {
+// 			return
+// 		}
+// 	}
+// }
