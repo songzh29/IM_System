@@ -27,3 +27,17 @@ func GetUserByUsername(username string) (*model.User, error) {
 	// 查询成功
 	return user, nil
 }
+
+// 根据用户ID查找用户
+func GetUserByUserID(userID uint) (*model.User, error) {
+	user := &model.User{}
+	result := mysqldb.DB.First(user, "id = ?", userID)
+	if result.Error != nil {
+		if errors.Is(result.Error, gorm.ErrRecordNotFound) {
+			return nil, nil // 用户不存在
+		}
+		return nil, result.Error // 真正的数据库错误
+	}
+	// 查询成功
+	return user, nil
+}

@@ -12,22 +12,24 @@ import (
 
 // 建立websocket，持续监听消息和发送消息
 func WsConnect(c *gin.Context) {
+	userid, ok := c.Get("user_id")
+	if !ok {
+		c.JSON(400, gin.H{"msg": "令牌失效"})
+		return
+	}
+
+	userId, ok := userid.(uint)
+	if !ok {
+		c.JSON(400, gin.H{"msg": "用户ID有误"})
+		return
+	}
+
 	conn, err := ws.Upgrader.Upgrade(c.Writer, c.Request, nil)
 	if err != nil {
 		c.JSON(400, gin.H{"msg": "websocket升级失败"})
 		return
 	}
 
-	userid, ok := c.Get("user_id")
-	if !ok {
-		c.JSON(400, gin.H{"msg": "令牌失效"})
-		return
-	}
-	userId, ok := userid.(uint)
-	if !ok {
-		c.JSON(400, gin.H{"msg": "用户ID有误"})
-		return
-	}
 	//设置用户的状态
 	send := make(chan []byte, ws.SendBufferSize)
 	client := ws.Client{UserID: userId, Conn: conn, Send: send, Manager: ws.Manager}
