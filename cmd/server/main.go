@@ -65,6 +65,7 @@ func main() {
 		private.POST("/profile", func(ctx *gin.Context) {
 			ctx.JSON(200, gin.H{"msg": "查看个人信息成功"})
 		})
+		private.GET("/ws", handler.WsConnect)
 	}
 
 	serverPort := fmt.Sprintf(":%d", config.ConfigInfo.Server.Port)

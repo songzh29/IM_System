@@ -6,8 +6,39 @@ import (
 	"github.com/gin-gonic/gin"
 	"github.com/songzh29/IM_System/internal/model"
 	"github.com/songzh29/IM_System/internal/service"
+	"github.com/songzh29/IM_System/internal/ws"
 	"github.com/songzh29/IM_System/pkg/jwt"
 )
+
+// 建立websocket，持续监听消息和发送消息
+func WsConnect(c *gin.Context) {
+	conn, err := ws.Upgrader.Upgrade(c.Writer, c.Request, nil)
+	if err != nil {
+		c.JSON(400, gin.H{"msg": "websocket升级失败"})
+		return
+	}
+
+	userid, ok := c.Get("user_id")
+	if !ok {
+		c.JSON(400, gin.H{"msg": "令牌失效"})
+		return
+	}
+	userId, ok := userid.(uint)
+	if !ok {
+		c.JSON(400, gin.H{"msg": "用户ID有误"})
+		return
+	}
+	//设置用户的状态
+	send := make(chan []byte, ws.SendBufferSize)
+	client := ws.Client{UserID: userId, Conn: conn, Send: send, Manager: ws.Manager}
+	ws.Manager.Register(&client)
+
+	//持续监听用户发送来的消息
+	go client.ListenMsg()
+
+	//将消息转发给接收方
+	go client.DeliverMsg()
+}
 
 func Register(c *gin.Context) {
 	user := model.User{}
