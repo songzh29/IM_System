@@ -17,21 +17,35 @@ func AddMember(conversationID uint, userID uint, role int) error {
 
 func GetConversationsByUserID(userID uint) ([]model.Conversation, error) {
 	var conMem []model.ConversationMember
-	result := mysqldb.DB.Select("conversation_id").Where("user_id = ?", userID).Find(&conMem)
+	result := mysqldb.DB.
+		Select("conversation_id").
+		Where("user_id = ?", userID).
+		Find(&conMem)
 	if result.Error != nil {
-		if errors.Is(result.Error, gorm.ErrRecordNotFound) {
-			return nil, nil // 无未读消息
-		}
-		return nil, result.Error // 真正的数据库错误
+		return nil, result.Error
 	}
+	if len(conMem) == 0 {
+		return nil, nil
+	}
+
+	// 提取ID
+	var ids []uint
+	for _, m := range conMem {
+		ids = append(ids, m.ConversationID)
+	}
+
 	var convs []model.Conversation
-	conResults := mysqldb.DB.Where(conMem).Find(&convs)
+	conResults := mysqldb.DB.
+		Where("id IN ?", ids).
+		Find(&convs)
+
 	if conResults.Error != nil {
-		if errors.Is(result.Error, gorm.ErrRecordNotFound) {
-			return nil, nil // 无未读消息
-		}
-		return nil, conResults.Error // 真正的数据库错误
+		return nil, conResults.Error
 	}
+	if len(convs) == 0 {
+		return nil, nil
+	}
+
 	return convs, nil
 }
 
@@ -44,4 +58,32 @@ func UpdateLastReadMsgID(conversationID uint, userID uint, msgID uint) error {
 		return errors.New("没有更新任何数据")
 	}
 	return nil
+}
+
+func CheckConversationExist(useridA uint, useridB uint, convtype int) (uint, error) {
+	var conv model.Conversation
+	var convmem model.ConversationMember
+
+	result := mysqldb.DB.Select("conversation_id").
+		Where("user_id IN ?", []uint{useridA, useridB}).
+		Group("conversation_id").
+		Having("COUNT(DISTINCT user_id) = 2").
+		Find(&convmem)
+	if result.Error != nil {
+		return 0, result.Error
+	}
+	if result.RowsAffected == 0 {
+		return 0, errors.New("这两人之间没有对话")
+	}
+
+	conRes := mysqldb.DB.First(&conv, "type = ? AND id = ?", convtype, convmem.ConversationID)
+	if conRes.Error != nil {
+		if errors.Is(conRes.Error, gorm.ErrRecordNotFound) {
+			return 0, nil // 用户不存在
+		}
+		return 0, conRes.Error // 真正的数据库错误
+	}
+
+	return conv.ID, nil
+
 }

@@ -39,7 +39,7 @@ func WsConnect(c *gin.Context) {
 	go client.ListenMsg()
 
 	//将消息转发给接收方
-	// go client.DeliverMsg()
+	go client.DeliverMsg()
 }
 
 func Register(c *gin.Context) {

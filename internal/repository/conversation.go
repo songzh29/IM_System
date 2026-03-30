@@ -25,3 +25,20 @@ func GetConversationByID(convID uint) (*model.Conversation, error) {
 	// 查询成功
 	return conv, nil
 }
+
+func UpdateConversation(convID uint, msg *model.Message) error {
+	result := mysqldb.DB.Model(&model.Conversation{}).
+		Where("id = ?", convID).
+		Updates(map[string]interface{}{
+			"last_msg_id":      msg.ID,
+			"last_msg_content": msg.Content,
+			"last_msg_time":    msg.CreatedAt,
+		})
+	if result.Error != nil {
+		return result.Error
+	}
+	if result.RowsAffected == 0 {
+		return errors.New("更新了0个字段")
+	}
+	return nil
+}
