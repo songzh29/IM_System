@@ -18,7 +18,7 @@ func GetConversationByID(convID uint) (*model.Conversation, error) {
 	result := mysqldb.DB.First(conv, "id = ?", convID)
 	if result.Error != nil {
 		if errors.Is(result.Error, gorm.ErrRecordNotFound) {
-			return nil, nil // 会话不存在
+			return nil, errors.New("会话不存在") // 会话不存在
 		}
 		return nil, result.Error // 真正的数据库错误
 	}
@@ -30,9 +30,9 @@ func UpdateConversation(convID uint, msg *model.Message) error {
 	result := mysqldb.DB.Model(&model.Conversation{}).
 		Where("id = ?", convID).
 		Updates(map[string]interface{}{
-			"last_msg_id":      msg.ID,
-			"last_msg_content": msg.Content,
-			"last_msg_time":    msg.CreatedAt,
+			"last_msg_id":      &msg.ID,
+			"last_msg_content": &msg.Content,
+			"last_msg_time":    &msg.CreatedAt,
 		})
 	if result.Error != nil {
 		return result.Error

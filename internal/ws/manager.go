@@ -32,9 +32,6 @@ func (m *ConnManager) Unregister(c *Client) {
 		// 确保是同一个连接（防止覆盖问题）
 		if existingClient == c {
 			delete(m.clients, c.UserID)
-
-			// 安全关闭 channel
-			close(c.Send)
 		}
 	}
 }

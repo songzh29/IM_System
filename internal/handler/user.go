@@ -35,11 +35,14 @@ func WsConnect(c *gin.Context) {
 	client := ws.Client{UserID: userId, Conn: conn, Send: send, Manager: ws.Manager}
 	ws.Manager.Register(&client)
 
+	//先把离线消息推送给用户
+	client.DeliverUnreadMsg()
+
 	//持续监听用户发送来的消息
 	go client.ListenMsg()
 
-	//将消息转发给接收方
-	go client.DeliverMsg()
+	//将消息转发给接收方，不开协程可以保证持续阻塞，这样可以保证c *gin.Context不被清理
+	client.DeliverMsg()
 }
 
 func Register(c *gin.Context) {

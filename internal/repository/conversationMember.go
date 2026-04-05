@@ -87,3 +87,30 @@ func CheckConversationExist(useridA uint, useridB uint, convtype int) (uint, err
 	return conv.ID, nil
 
 }
+
+func CheckUnreadMessage(userID uint) error {
+	//利用用户的id查看用户的未读消息
+	convmem := model.ConversationMember{}
+	result := mysqldb.DB.First(&convmem, "user_id = ?", userID)
+	if result.Error != nil {
+		if errors.Is(result.Error, gorm.ErrRecordNotFound) {
+			return errors.New("会话记录不存在") // 会话记录不存在
+		}
+		return result.Error // 真正的数据库错误
+	}
+	return nil
+}
+
+func GetConversationMsgByUserID(userID uint) ([]model.Message, error) {
+	var msgs []model.Message
+	result := mysqldb.DB.Table("messages").
+		Joins("JOIN conversations AS conv ON messages.conversation_id = conv.id").
+		Joins("JOIN conversation_members AS cm on conv.id = cm.conversation_id").
+		Where("cm.user_id = ?", userID).
+		Where("last_msg_id > cm.last_read_msg_id").
+		Find(&msgs)
+	if result.Error != nil {
+		return msgs, result.Error
+	}
+	return msgs, nil
+}
