@@ -14,13 +14,13 @@ func CreateUser(user *model.User) error {
 	return result.Error
 }
 
-// 根据用户名查找用户（登录时用）
+// 根据用户名查找用户
 func GetUserByUsername(username string) (*model.User, error) {
 	user := &model.User{}
 	result := mysqldb.DB.First(user, "username = ?", username)
 	if result.Error != nil {
 		if errors.Is(result.Error, gorm.ErrRecordNotFound) {
-			return nil, result.Error // 用户不存在
+			return nil, nil // 用户不存在
 		}
 		return nil, result.Error // 真正的数据库错误
 	}
@@ -34,7 +34,7 @@ func GetUserByUserID(userID uint) (*model.User, error) {
 	result := mysqldb.DB.First(user, "id = ?", userID)
 	if result.Error != nil {
 		if errors.Is(result.Error, gorm.ErrRecordNotFound) {
-			return nil, result.Error // 用户不存在
+			return nil, nil // 用户不存在
 		}
 		return nil, result.Error // 真正的数据库错误
 	}

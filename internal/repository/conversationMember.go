@@ -107,7 +107,7 @@ func GetConversationMsgByUserID(userID uint) ([]model.Message, error) {
 		Joins("JOIN conversations AS conv ON messages.conversation_id = conv.id").
 		Joins("JOIN conversation_members AS cm on conv.id = cm.conversation_id").
 		Where("cm.user_id = ?", userID).
-		Where("last_msg_id > cm.last_read_msg_id").
+		Where("messages.id > cm.last_read_msg_id").
 		Find(&msgs)
 	if result.Error != nil {
 		return msgs, result.Error

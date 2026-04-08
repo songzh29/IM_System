@@ -42,6 +42,7 @@ var Upgrader = websocket.Upgrader{
 	},
 }
 
+// 负责监听客户端发送来的消息
 func (c *Client) ListenMsg() {
 	defer func() {
 		// 1. 从管理器注销
@@ -86,6 +87,7 @@ func (c *Client) ListenMsg() {
 				c.Send <- []byte("发送失败")
 				continue
 			}
+			fmt.Println("对话创建成功")
 			convID = conv.ID
 			//将两人加入会话成员表（拉入会话）
 			err = repository.AddMember(conv.ID, c.UserID, 0)
@@ -115,6 +117,13 @@ func (c *Client) ListenMsg() {
 		if err != nil {
 			fmt.Println("会话表更新失败")
 			c.Send <- []byte("发送失败")
+			continue
+		}
+
+		//把已读消息更新到自己发送的消息，自己发送的肯定是已读
+		err = repository.UpdateLastReadMsgID(convID, c.UserID, sendMsg.ID)
+		if err != nil {
+			fmt.Println("尝试将已读消息更新为自己刚刚发送的消息ID,但是更新失败")
 			continue
 		}
 
@@ -186,8 +195,9 @@ func (c *Client) DeliverUnreadMsg() {
 	}
 	if len(unreadMsgs) == 0 {
 		fmt.Println("暂无离线消息")
-		c.Send <- []byte("暂无离线消息")
 	}
+	//创建一个map，key和value分别对应conv_id和max_msg_id
+	msgMap := make(map[uint]uint)
 	for _, msg := range unreadMsgs {
 		sendMsg := CollectMessage{
 			MsgID:          msg.ID,
@@ -200,7 +210,22 @@ func (c *Client) DeliverUnreadMsg() {
 			fmt.Println("消息序列化失败")
 			continue
 		}
-		c.Send <- collectMsgByte
+		err = c.Conn.WriteMessage(websocket.TextMessage, collectMsgByte)
+		if err != nil {
+			fmt.Println("离线消息推送失败")
+			return
+		}
+		if msgMap[msg.ConversationID] < msg.ID {
+			msgMap[msg.ConversationID] = msg.ID
+		}
+
+	}
+	for convID, lastmsgID := range msgMap {
+		err := repository.UpdateLastReadMsgID(convID, c.UserID, lastmsgID)
+		if err != nil {
+			fmt.Println("数据库消息更新失败")
+			return
+		}
 	}
 
 }

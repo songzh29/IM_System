@@ -18,7 +18,7 @@ func main() {
 		log.Fatalf("zap初始化失败: %v", err)
 	}
 
-	// ✅ 先初始化配置
+	// 先初始化配置
 	err = config.Init()
 	if err != nil {
 		logger.Panic("配置初始化失败", zap.Error(err))
