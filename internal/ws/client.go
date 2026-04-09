@@ -2,13 +2,13 @@ package ws
 
 import (
 	"encoding/json"
-	"errors"
 	"fmt"
 	"net/http"
 
 	"github.com/gorilla/websocket"
 	"github.com/songzh29/IM_System/internal/model"
 	"github.com/songzh29/IM_System/internal/repository"
+	"go.uber.org/zap"
 )
 
 const (
@@ -60,46 +60,63 @@ func (c *Client) ListenMsg() {
 		// 解析 JSON
 		var m JsonMessage
 		if err := json.Unmarshal(msg, &m); err != nil {
-			fmt.Println("json解析失败:", err)
+			zap.L().Error("json解析失败:", zap.Error(err))
 			continue
 		}
 		//查看用户是否存在
 		targetUser, err := repository.GetUserByUserID(m.ToUserID)
 		if err != nil {
-			fmt.Println("用户不存在")
-			c.Send <- []byte("发送失败")
+			if err.Error() == "用户不存在" {
+				zap.L().Warn("目标用户不存在",
+					zap.Uint("sender_id", c.UserID),
+					zap.Uint("to_user_id", m.ToUserID),
+					zap.Error(err),
+				)
+			}
+			zap.L().Error("查找目标用户出错",
+				zap.Uint("sender_id", c.UserID),
+				zap.Uint("to_user_id", m.ToUserID),
+				zap.Error(err),
+			)
 			continue
 		}
 
 		//查看用户之间有没有会话
 		convID, err := repository.CheckConversationExist(c.UserID, targetUser.ID, 1)
 		if err != nil {
-			fmt.Println("查找对话失败")
+			if err.Error() == "这两人之间没有对话" {
+				zap.L().Warn("两人之间无对话",
+					zap.Uint("sender_id", c.UserID),
+					zap.Uint("to_user_id", m.ToUserID),
+				)
+			}
+			zap.L().Error("查找对话失败",
+				zap.Uint("sender_id", c.UserID),
+				zap.Uint("to_user_id", m.ToUserID),
+				zap.Error(err),
+			)
 		}
 		//没有对话则创建对话
 		if convID == 0 {
-			fmt.Println("两人之间无对话，正在创建对话")
+			zap.L().Info("正在创建对话")
 			convName := fmt.Sprintf("%d & %d", c.UserID, targetUser.ID)
 			conv := model.Conversation{Type: 1, Name: convName, CreatorID: c.UserID}
 			err := repository.CreateConversation(&conv)
 			if err != nil {
-				fmt.Println("创建对话失败")
-				c.Send <- []byte("发送失败")
+				zap.L().Error("创建对话失败", zap.Error(err))
 				continue
 			}
-			fmt.Println("对话创建成功")
+			zap.L().Info("对话创建成功")
 			convID = conv.ID
 			//将两人加入会话成员表（拉入会话）
 			err = repository.AddMember(conv.ID, c.UserID, 0)
 			if err != nil {
-				fmt.Printf("%d 加入会话失败", c.UserID)
-				c.Send <- []byte("发送失败")
+				zap.L().Error("加入会话失败", zap.Uint("user_id", c.UserID), zap.Error(err))
 				continue
 			}
 			err = repository.AddMember(conv.ID, targetUser.ID, 0)
 			if err != nil {
-				fmt.Printf("%d 加入会话失败", targetUser.ID)
-				c.Send <- []byte("发送失败")
+				zap.L().Error("加入会话失败", zap.Uint("user_id", targetUser.ID), zap.Error(err))
 				continue
 			}
 		}
@@ -108,22 +125,20 @@ func (c *Client) ListenMsg() {
 		sendMsg := model.Message{ConversationID: convID, SenderID: c.UserID, MsgType: 1, Content: m.Content, ClientMsgID: m.ClientMsgID}
 		err = repository.CreateMessage(&sendMsg)
 		if err != nil {
-			fmt.Println("消息入库失败")
-			c.Send <- []byte("发送失败")
+			zap.L().Error("消息入库失败", zap.Error(err))
 			continue
 		}
 		//更新会话表
 		err = repository.UpdateConversation(convID, &sendMsg)
 		if err != nil {
-			fmt.Println("会话表更新失败")
-			c.Send <- []byte("发送失败")
+			zap.L().Error("会话表更新失败", zap.Error(err))
 			continue
 		}
 
 		//把已读消息更新到自己发送的消息，自己发送的肯定是已读
 		err = repository.UpdateLastReadMsgID(convID, c.UserID, sendMsg.ID)
 		if err != nil {
-			fmt.Println("尝试将已读消息更新为自己刚刚发送的消息ID,但是更新失败")
+			zap.L().Error("尝试将已读消息更新为自己刚刚发送的消息ID,但是更新失败", zap.Error(err))
 			continue
 		}
 
@@ -132,16 +147,14 @@ func (c *Client) ListenMsg() {
 		targetClient, ok := c.Manager.clients[m.ToUserID]
 		c.Manager.mu.RUnlock()
 		if !ok {
-			fmt.Println("用户不在线")
-			c.Send <- []byte("用户不在线,发送失败")
+			zap.L().Warn("用户不在线")
 			continue
 		}
 
 		collectMsg := CollectMessage{SenderID: c.UserID, ConversationID: convID, MsgID: sendMsg.ID, Content: m.Content}
 		collectMsgByte, err := json.Marshal(collectMsg)
 		if err != nil {
-			fmt.Println("消息序列化失败")
-			c.Send <- []byte("发送失败")
+			zap.L().Error("消息序列化失败", zap.Error(err))
 			continue
 		}
 
@@ -164,22 +177,25 @@ func (c *Client) DeliverMsg() {
 		collectMsg := CollectMessage{}
 		err := json.Unmarshal(msg, &collectMsg)
 		if err != nil {
-			fmt.Println("消息反序列化失败")
-			return
+			zap.L().Error("消息反序列化失败", zap.Error(err))
+			continue
 		}
 		//把消息发送给用户
 		err = c.Conn.WriteMessage(websocket.TextMessage, msg)
 		if err != nil {
+			zap.L().Error("消息发送失败",
+				zap.Uint("target_id", c.UserID),
+				zap.Error(err))
 			return
 		}
 		//如果用户成功接受了消息，则更新last_read_msg_id
 		err = repository.UpdateLastReadMsgID(collectMsg.ConversationID, c.UserID, collectMsg.MsgID)
 		if err != nil {
-			if errors.Is(err, errors.New("没有更新任何数据")) {
-				fmt.Println("没有可更新消息")
+			if err.Error() == "没有更新任何数据" {
+				zap.L().Warn("没有可更新消息")
 			}
-			fmt.Println("消息更新失败")
-			return
+			zap.L().Error("消息更新失败", zap.Uint("target_id", c.UserID), zap.Error(err))
+			continue
 		}
 
 	}
@@ -188,13 +204,13 @@ func (c *Client) DeliverMsg() {
 func (c *Client) DeliverUnreadMsg() {
 	//先根据用户ID去查看用户的conversation_id 和 last_read_msg_id
 	//利用conversation_id将conversation_member和conversation表连接起来，若last_read_msg_id<last_msg_id，则推送消息
-	unreadMsgs, err := repository.GetConversationMsgByUserID(c.UserID)
+	unreadMsgs, err := repository.GetUnreadConversationMsgByUserID(c.UserID)
 	if err != nil {
-		fmt.Println("离线消息推送失败")
+		zap.L().Error("离线消息查找失败", zap.Uint("user_id", c.UserID), zap.Error(err))
 		return
 	}
 	if len(unreadMsgs) == 0 {
-		fmt.Println("暂无离线消息")
+		zap.L().Warn("暂无离线消息")
 	}
 	//创建一个map，key和value分别对应conv_id和max_msg_id
 	msgMap := make(map[uint]uint)
@@ -207,12 +223,22 @@ func (c *Client) DeliverUnreadMsg() {
 		}
 		collectMsgByte, err := json.Marshal(sendMsg)
 		if err != nil {
-			fmt.Println("消息序列化失败")
+			zap.L().Error("消息序列化失败",
+				zap.Uint("msg_id", sendMsg.MsgID),
+				zap.Uint("user_id", c.UserID),
+				zap.Uint("sender_id", sendMsg.SenderID),
+				zap.Error(err),
+			)
 			continue
 		}
 		err = c.Conn.WriteMessage(websocket.TextMessage, collectMsgByte)
 		if err != nil {
-			fmt.Println("离线消息推送失败")
+			zap.L().Error("离线消息推送失败",
+				zap.Uint("msg_id", sendMsg.MsgID),
+				zap.Uint("user_id", c.UserID),
+				zap.Uint("sender_id", sendMsg.SenderID),
+				zap.Error(err),
+			)
 			return
 		}
 		if msgMap[msg.ConversationID] < msg.ID {
@@ -223,7 +249,7 @@ func (c *Client) DeliverUnreadMsg() {
 	for convID, lastmsgID := range msgMap {
 		err := repository.UpdateLastReadMsgID(convID, c.UserID, lastmsgID)
 		if err != nil {
-			fmt.Println("数据库消息更新失败")
+			zap.L().Error("数据库更新last_read_msg_id失败", zap.Error(err))
 			return
 		}
 	}

@@ -11,6 +11,7 @@ type Config struct {
 	Mysql  MysqlConfig  `mapstructure:"mysql"`
 	Redis  RedisConfig  `mapstructure:"redis"`
 	JWT    JWTConfig    `mapstructure:"jwt"`
+	Zap    ZapConfig    `mapstructure:"zap"`
 }
 
 type ServerConfig struct {
@@ -37,6 +38,11 @@ type RedisConfig struct {
 type JWTConfig struct {
 	Secret string `mapstructure:"secret"`
 	Expire int    `mapstructure:"expire"`
+}
+
+type ZapConfig struct {
+	IsDev bool   `mapstructure:"isdev"`
+	Level string `mapstructure:"level"`
 }
 
 var ConfigInfo *Config // 此时 ConfigInfo = nil

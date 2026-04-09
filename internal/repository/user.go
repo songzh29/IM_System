@@ -20,7 +20,7 @@ func GetUserByUsername(username string) (*model.User, error) {
 	result := mysqldb.DB.First(user, "username = ?", username)
 	if result.Error != nil {
 		if errors.Is(result.Error, gorm.ErrRecordNotFound) {
-			return nil, nil // 用户不存在
+			return nil, errors.New("用户不存在") // 用户不存在
 		}
 		return nil, result.Error // 真正的数据库错误
 	}
@@ -34,7 +34,7 @@ func GetUserByUserID(userID uint) (*model.User, error) {
 	result := mysqldb.DB.First(user, "id = ?", userID)
 	if result.Error != nil {
 		if errors.Is(result.Error, gorm.ErrRecordNotFound) {
-			return nil, nil // 用户不存在
+			return nil, errors.New("用户不存在") // 用户不存在
 		}
 		return nil, result.Error // 真正的数据库错误
 	}

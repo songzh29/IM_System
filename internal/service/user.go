@@ -13,7 +13,9 @@ func Register(username, password string) error {
 	//先检查用户存不存在
 	user, err := repository.GetUserByUsername(username)
 	if err != nil {
-		return err
+		if err.Error() != "用户不存在" {
+			return err
+		}
 	}
 	if user != nil {
 		return errors.New("用户名已被使用")
@@ -42,13 +44,13 @@ func Login(username, password string) (uint, error) {
 	//查找用户是否存在
 	user, err := repository.GetUserByUsername(username)
 	if err != nil {
+		// 用户不存在返回错误
+		if err.Error() == "用户不存在" {
+			err = errors.New("用户未注册，登录失败")
+		}
 		return 0, err
 	}
-	// 用户不存在返回错误
-	if user == nil {
-		err = errors.New("用户未注册，登录失败")
-		return 0, err
-	}
+
 	//输错密码返回错误
 	err = bcrypt.CompareHashAndPassword([]byte(user.Password), []byte(password))
 	if err != nil {

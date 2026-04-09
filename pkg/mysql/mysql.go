@@ -36,3 +36,11 @@ func Init() error {
 
 	return nil
 }
+
+func Close() error {
+	sqlDB, err := DB.DB()
+	if err != nil {
+		return err
+	}
+	return sqlDB.Close()
+}

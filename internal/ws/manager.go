@@ -35,3 +35,11 @@ func (m *ConnManager) Unregister(c *Client) {
 		}
 	}
 }
+
+func (m *ConnManager) CloseAll() {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	for _, client := range m.clients {
+		client.Conn.Close()
+	}
+}

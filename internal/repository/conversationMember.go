@@ -101,7 +101,7 @@ func CheckUnreadMessage(userID uint) error {
 	return nil
 }
 
-func GetConversationMsgByUserID(userID uint) ([]model.Message, error) {
+func GetUnreadConversationMsgByUserID(userID uint) ([]model.Message, error) {
 	var msgs []model.Message
 	result := mysqldb.DB.Table("messages").
 		Joins("JOIN conversations AS conv ON messages.conversation_id = conv.id").

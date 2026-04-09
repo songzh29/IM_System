@@ -20,3 +20,8 @@ redis:
 jwt:
   secret: "your-secret-key"
   expire: 72  # 小时
+
+zap:
+  isdev: true
+  level: "info"
+  
