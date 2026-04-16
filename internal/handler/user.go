@@ -77,14 +77,14 @@ func Login(c *gin.Context) {
 		c.JSON(400, gin.H{"msg": "服务器出错"})
 		return
 	}
-	uerid, err := service.Login(user.Username, user.Password)
+	uerID, err := service.Login(user.Username, user.Password)
 	if err != nil {
 		zap.L().Error("用户登录失败", zap.String("username", user.Username), zap.Error(err))
 		c.JSON(400, gin.H{"msg": err.Error()})
 		return
 	}
 	//签发JWT并设置cookie
-	token, err := jwt.GenerateToken(uerid)
+	token, err := jwt.GenerateToken(uerID)
 	if err != nil {
 		zap.L().Error("用户JWT签发失败", zap.String("username", user.Username), zap.Error(err))
 		c.JSON(400, gin.H{"msg": "JWT签发失败"})

@@ -65,14 +65,15 @@ func (c *Client) ListenMsg() {
 		}
 		//查看用户是否存在
 		targetUser, err := repository.GetUserByUserID(m.ToUserID)
-		if err != nil {
-			if err.Error() == "用户不存在" {
-				zap.L().Warn("目标用户不存在",
-					zap.Uint("sender_id", c.UserID),
-					zap.Uint("to_user_id", m.ToUserID),
-					zap.Error(err),
-				)
-			}
+
+		if err == nil && targetUser == nil {
+			zap.L().Warn("目标用户不存在",
+				zap.Uint("sender_id", c.UserID),
+				zap.Uint("to_user_id", m.ToUserID),
+				zap.Error(err),
+			)
+			continue
+		} else if err != nil {
 			zap.L().Error("查找目标用户出错",
 				zap.Uint("sender_id", c.UserID),
 				zap.Uint("to_user_id", m.ToUserID),
@@ -83,19 +84,21 @@ func (c *Client) ListenMsg() {
 
 		//查看用户之间有没有会话
 		convID, err := repository.CheckConversationExist(c.UserID, targetUser.ID, 1)
-		if err != nil {
-			if err.Error() == "这两人之间没有对话" {
-				zap.L().Warn("两人之间无对话",
-					zap.Uint("sender_id", c.UserID),
-					zap.Uint("to_user_id", m.ToUserID),
-				)
-			}
+		if err == nil && convID == 0 {
+			zap.L().Warn("两人之间无对话",
+				zap.Uint("sender_id", c.UserID),
+				zap.Uint("to_user_id", m.ToUserID),
+			)
+			continue
+		} else if err != nil {
 			zap.L().Error("查找对话失败",
 				zap.Uint("sender_id", c.UserID),
 				zap.Uint("to_user_id", m.ToUserID),
 				zap.Error(err),
 			)
+			continue
 		}
+
 		//没有对话则创建对话
 		if convID == 0 {
 			zap.L().Info("正在创建对话")
