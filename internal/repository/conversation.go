@@ -4,27 +4,33 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"strconv"
 	"time"
 
 	"github.com/songzh29/IM_System/internal/model"
 	mysqldb "github.com/songzh29/IM_System/pkg/mysql"
 	redisdb "github.com/songzh29/IM_System/pkg/redis"
-	"go.uber.org/zap"
 	"gorm.io/gorm"
 )
 
 func CreateConversation(conv *model.Conversation) error {
-	//先在redis中创建
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-	defer cancel() // 释放 context 资源
-	hashConv := fmt.Sprintf("conv:%d", conv.ID)
-
-	if err := redisdb.Rdb.HSet(ctx, hashConv, conv).Err(); err != nil {
-		zap.L().Error("Redis写入对话失败", zap.Error(err))
-	}
-
 	result := mysqldb.DB.Create(conv)
 	return result.Error
+}
+
+func CacheConversationID(useridA uint, useridB uint, convtype uint, convID uint) error {
+	//强制排序，ID小的在前，消除方向性差异
+	minID, maxID := useridA, useridB
+	if minID > maxID {
+		minID, maxID = useridB, useridA
+	}
+
+	redisKey := fmt.Sprintf("conv:exist:type:%d:user:%d_%d", convtype, minID, maxID)
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel() // 释放 context 资源
+
+	return redisdb.Rdb.Set(ctx, redisKey, strconv.Itoa(int(convID)), 24*time.Hour).Err()
 }
 
 func GetConversationByID(convID uint) (*model.Conversation, error) {

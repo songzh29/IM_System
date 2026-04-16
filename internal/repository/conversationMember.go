@@ -115,6 +115,10 @@ func CheckConversationExist(useridA uint, useridB uint, convtype int) (uint, err
 	conRes := mysqldb.DB.First(&conv, "type = ? AND id = ?", convtype, convmem.ConversationID)
 	if conRes.Error != nil {
 		if errors.Is(conRes.Error, gorm.ErrRecordNotFound) {
+			//写入redis,设置ID为0,代表不存在对话
+			if err := redisdb.Rdb.Set(ctx, redisKey, 0, 24*time.Hour).Err(); err != nil {
+				zap.L().Error("Redis写入对话失败", zap.Error(err))
+			}
 			return 0, nil // 对话不存在
 		}
 		return 0, conRes.Error // 真正的数据库错误
@@ -126,7 +130,6 @@ func CheckConversationExist(useridA uint, useridB uint, convtype int) (uint, err
 	}
 
 	return conv.ID, nil
-
 }
 
 func CheckUnreadMessage(userID uint) error {

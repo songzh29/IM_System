@@ -89,14 +89,12 @@ func (c *Client) ListenMsg() {
 				zap.Uint("sender_id", c.UserID),
 				zap.Uint("to_user_id", m.ToUserID),
 			)
-			continue
 		} else if err != nil {
 			zap.L().Error("查找对话失败",
 				zap.Uint("sender_id", c.UserID),
 				zap.Uint("to_user_id", m.ToUserID),
 				zap.Error(err),
 			)
-			continue
 		}
 
 		//没有对话则创建对话
@@ -104,6 +102,12 @@ func (c *Client) ListenMsg() {
 			zap.L().Info("正在创建对话")
 			convName := fmt.Sprintf("%d & %d", c.UserID, targetUser.ID)
 			conv := model.Conversation{Type: 1, Name: convName, CreatorID: c.UserID}
+			//存入redis
+			err = repository.CacheConversationID(c.UserID, targetUser.ID, 1, convID)
+			if err != nil {
+				zap.L().Error("Redis写入对话失败", zap.Error(err))
+			}
+			//存入MySQL
 			err := repository.CreateConversation(&conv)
 			if err != nil {
 				zap.L().Error("创建对话失败", zap.Error(err))
