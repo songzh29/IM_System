@@ -2,6 +2,7 @@ package ws
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 
@@ -102,11 +103,6 @@ func (c *Client) ListenMsg() {
 			zap.L().Info("正在创建对话")
 			convName := fmt.Sprintf("%d & %d", c.UserID, targetUser.ID)
 			conv := model.Conversation{Type: 1, Name: convName, CreatorID: c.UserID}
-			//存入redis
-			err = repository.CacheConversationID(c.UserID, targetUser.ID, 1, convID)
-			if err != nil {
-				zap.L().Error("Redis写入对话失败", zap.Error(err))
-			}
 			//存入MySQL
 			err := repository.CreateConversation(&conv)
 			if err != nil {
@@ -115,6 +111,13 @@ func (c *Client) ListenMsg() {
 			}
 			zap.L().Info("对话创建成功")
 			convID = conv.ID
+
+			//存入redis
+			err = repository.CacheConversationID(c.UserID, targetUser.ID, 1, convID)
+			if err != nil {
+				zap.L().Error("Redis写入对话失败", zap.Error(err))
+			}
+
 			//将两人加入会话成员表（拉入会话）
 			err = repository.AddMember(conv.ID, c.UserID, 0)
 			if err != nil {
@@ -198,7 +201,7 @@ func (c *Client) DeliverMsg() {
 		//如果用户成功接受了消息，则更新last_read_msg_id
 		err = repository.UpdateLastReadMsgID(collectMsg.ConversationID, c.UserID, collectMsg.MsgID)
 		if err != nil {
-			if err.Error() == "没有更新任何数据" {
+			if errors.Is(err, repository.ErrUpdateNoneLastReadMsg) {
 				zap.L().Warn("没有可更新消息")
 			}
 			zap.L().Error("消息更新失败", zap.Uint("target_id", c.UserID), zap.Error(err))

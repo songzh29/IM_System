@@ -15,7 +15,18 @@ import (
 
 func CreateConversation(conv *model.Conversation) error {
 	result := mysqldb.DB.Create(conv)
-	return result.Error
+
+	if result.Error != nil {
+		// 判断错误是否为“唯一键重复”
+		if errors.Is(result.Error, gorm.ErrDuplicatedKey) {
+			// 幂等性体现：既然已经存在了，我们就当它这次也创建成功了，不返回错误
+			// zap.L().Info("对话已存在，忽略创建")
+			return nil
+		}
+		// 如果是其他真正的系统错误（如网络断开、表不存在），照常返回
+		return result.Error
+	}
+	return nil
 }
 
 func CacheConversationID(useridA uint, useridB uint, convtype uint, convID uint) error {
@@ -30,7 +41,7 @@ func CacheConversationID(useridA uint, useridB uint, convtype uint, convID uint)
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel() // 释放 context 资源
 
-	return redisdb.Rdb.Set(ctx, redisKey, strconv.Itoa(int(convID)), 24*time.Hour).Err()
+	return redisdb.Rdb.Set(ctx, redisKey, strconv.Itoa(int(convID)), 5*time.Minute).Err()
 }
 
 func GetConversationByID(convID uint) (*model.Conversation, error) {
@@ -38,7 +49,7 @@ func GetConversationByID(convID uint) (*model.Conversation, error) {
 	result := mysqldb.DB.First(conv, "id = ?", convID)
 	if result.Error != nil {
 		if errors.Is(result.Error, gorm.ErrRecordNotFound) {
-			return nil, errors.New("会话不存在") // 会话不存在
+			return nil, nil // 会话不存在
 		}
 		return nil, result.Error // 真正的数据库错误
 	}

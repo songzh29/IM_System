@@ -15,6 +15,9 @@ import (
 	"gorm.io/gorm"
 )
 
+var ErrUpdateNoneLastReadMsg = errors.New("没有更新任何数据")
+var ErrNoConvRecord = errors.New("会话记录不存在")
+
 func AddMember(conversationID uint, userID uint, role int) error {
 	conMem := model.ConversationMember{ConversationID: conversationID, UserID: userID, Role: role, JoinedAt: time.Now()}
 	result := mysqldb.DB.Create(&conMem)
@@ -61,7 +64,7 @@ func UpdateLastReadMsgID(conversationID uint, userID uint, msgID uint) error {
 		return result.Error // 真正的数据库错误
 	}
 	if result.RowsAffected == 0 {
-		return errors.New("没有更新任何数据")
+		return ErrUpdateNoneLastReadMsg
 	}
 	return nil
 }
@@ -89,8 +92,10 @@ func CheckConversationExist(useridA uint, useridB uint, convtype int) (uint, err
 		convID, parseErr := strconv.ParseUint(val, 10, 32)
 		if parseErr == nil {
 			if convID == 0 {
+				zap.L().Info("Redis查到了,没有对话")
 				return 0, nil //没有对话
 			}
+			zap.L().Info("Redis查到了对话", zap.Uint64("Convid", convID))
 			return uint(convID), nil
 		}
 		zap.L().Error("Redis中会话ID解析失败", zap.Error(parseErr))
@@ -116,7 +121,7 @@ func CheckConversationExist(useridA uint, useridB uint, convtype int) (uint, err
 	if conRes.Error != nil {
 		if errors.Is(conRes.Error, gorm.ErrRecordNotFound) {
 			//写入redis,设置ID为0,代表不存在对话
-			if err := redisdb.Rdb.Set(ctx, redisKey, 0, 24*time.Hour).Err(); err != nil {
+			if err := redisdb.Rdb.Set(ctx, redisKey, 0, 5*time.Minute).Err(); err != nil {
 				zap.L().Error("Redis写入对话失败", zap.Error(err))
 			}
 			return 0, nil // 对话不存在
@@ -125,7 +130,7 @@ func CheckConversationExist(useridA uint, useridB uint, convtype int) (uint, err
 	}
 
 	//写入redis
-	if err := redisdb.Rdb.Set(ctx, redisKey, conv.ID, 24*time.Hour).Err(); err != nil {
+	if err := redisdb.Rdb.Set(ctx, redisKey, conv.ID, 1*time.Hour).Err(); err != nil {
 		zap.L().Error("Redis写入对话失败", zap.Error(err))
 	}
 
@@ -138,7 +143,7 @@ func CheckUnreadMessage(userID uint) error {
 	result := mysqldb.DB.First(&convmem, "user_id = ?", userID)
 	if result.Error != nil {
 		if errors.Is(result.Error, gorm.ErrRecordNotFound) {
-			return errors.New("会话记录不存在") // 会话记录不存在
+			return ErrNoConvRecord // 会话记录不存在
 		}
 		return result.Error // 真正的数据库错误
 	}
@@ -152,6 +157,7 @@ func GetUnreadConversationMsgByUserID(userID uint) ([]model.Message, error) {
 		Joins("JOIN conversation_members AS cm on conv.id = cm.conversation_id").
 		Where("cm.user_id = ?", userID).
 		Where("messages.id > cm.last_read_msg_id").
+		Order("messages.id ASC").
 		Find(&msgs)
 	if result.Error != nil {
 		return msgs, result.Error

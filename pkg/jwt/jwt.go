@@ -26,12 +26,12 @@ func GenerateToken(userID uint) (string, error) {
 // 解析token，返回userID
 func ParseToken(tokenStr string) (uint, error) {
 	// 声明解译出来的载体
-	clamis := jwt.MapClaims{}
+	claims := jwt.MapClaims{}
 	//解析token
-	token, err := jwt.ParseWithClaims(tokenStr, clamis, func(token *jwt.Token) (interface{}, error) {
+	token, err := jwt.ParseWithClaims(tokenStr, claims, func(token *jwt.Token) (interface{}, error) {
 		// 确认签名算法是我们期望的 HS256，防止算法篡改攻击
 		if _, ok := token.Method.(*jwt.SigningMethodHMAC); !ok {
-			return nil, errors.New("非法加密")
+			return nil, errors.New("非预期的签名算法")
 		}
 		return getSecret(), nil
 	})
@@ -39,7 +39,7 @@ func ParseToken(tokenStr string) (uint, error) {
 		return 0, err
 	}
 	if token.Valid {
-		userID, ok := clamis["user_id"].(float64)
+		userID, ok := claims["user_id"].(float64)
 		if !ok {
 			return 0, errors.New("非法ID")
 		}

@@ -13,7 +13,7 @@ func Register(username, password string) error {
 	//先检查用户存不存在
 	user, err := repository.GetUserByUsername(username)
 	if err != nil {
-		if err.Error() != "用户不存在" {
+		if !errors.Is(err, repository.ErrUserNotFound) {
 			return err
 		}
 	}
