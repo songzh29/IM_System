@@ -14,6 +14,7 @@ import (
 	"github.com/gin-gonic/gin"
 	"github.com/songzh29/IM_System/config"
 	"github.com/songzh29/IM_System/internal/handler"
+	"github.com/songzh29/IM_System/internal/mq"
 	"github.com/songzh29/IM_System/internal/ws"
 	"github.com/songzh29/IM_System/pkg/logger"
 	mysqldb "github.com/songzh29/IM_System/pkg/mysql"
@@ -40,6 +41,12 @@ func main() {
 	err = redisdb.Init()
 	if err != nil {
 		zap.L().Panic("Redis连接失败", zap.Error(err))
+	}
+
+	//rabbitmq相关内容初始化
+	err = mq.Start()
+	if err != nil {
+		zap.L().Panic("RabbitMQ初始化失败", zap.Error(err))
 	}
 
 	//gin连接

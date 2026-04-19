@@ -8,6 +8,7 @@ import (
 
 	"github.com/gorilla/websocket"
 	"github.com/songzh29/IM_System/internal/model"
+	"github.com/songzh29/IM_System/internal/mq"
 	"github.com/songzh29/IM_System/internal/repository"
 	"go.uber.org/zap"
 )
@@ -138,12 +139,27 @@ func (c *Client) ListenMsg() {
 			zap.L().Error("消息入库失败", zap.Error(err))
 			continue
 		}
-		//更新会话表
-		err = repository.UpdateConversation(convID, &sendMsg)
+
+		// //更新会话表
+		// err = repository.UpdateConversation(convID, &sendMsg)
+		// if err != nil {
+		// 	zap.L().Error("会话表更新失败", zap.Error(err))
+		// 	continue
+		// }
+		// MQ生产端推送消息
+		mqMsg := &model.MqMessage{ConvID: convID, SendMsg: sendMsg}
+		err = mq.PublishMessageSent(mqMsg)
 		if err != nil {
-			zap.L().Error("会话表更新失败", zap.Error(err))
+			zap.L().Error("MQ发布消息会话表更新消息失败", zap.Error(err))
 			continue
 		}
+		// 开协程消费消息
+		go func() {
+			err := mq.StartConversationUpdateConsumer()
+			if err != nil {
+				zap.L().Error("会话表更新失败", zap.Error(err))
+			}
+		}()
 
 		//把已读消息更新到自己发送的消息，自己发送的肯定是已读
 		err = repository.UpdateLastReadMsgID(convID, c.UserID, sendMsg.ID)

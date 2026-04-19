@@ -12,3 +12,8 @@ type Message struct {
 	Status         int
 	CreatedAt      time.Time
 }
+
+type MqMessage struct {
+	ConvID  uint    `json:"conv_id"`
+	SendMsg Message `json:"sent_message"`
+}

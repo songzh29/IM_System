@@ -7,11 +7,12 @@ import (
 )
 
 type Config struct {
-	Server ServerConfig `mapstructure:"server"`
-	Mysql  MysqlConfig  `mapstructure:"mysql"`
-	Redis  RedisConfig  `mapstructure:"redis"`
-	JWT    JWTConfig    `mapstructure:"jwt"`
-	Zap    ZapConfig    `mapstructure:"zap"`
+	Server   ServerConfig   `mapstructure:"server"`
+	Mysql    MysqlConfig    `mapstructure:"mysql"`
+	Redis    RedisConfig    `mapstructure:"redis"`
+	JWT      JWTConfig      `mapstructure:"jwt"`
+	Zap      ZapConfig      `mapstructure:"zap"`
+	RabbitMQ RabbitMqConfig `mapstructure:"rabbitmq"`
 }
 
 type ServerConfig struct {
@@ -43,6 +44,14 @@ type JWTConfig struct {
 type ZapConfig struct {
 	IsDev bool   `mapstructure:"isdev"`
 	Level string `mapstructure:"level"`
+}
+
+type RabbitMqConfig struct {
+	Host     string `mapstructure:"host"`
+	Port     int    `mapstructure:"port"`
+	User     string `mapstructure:"user"`
+	Password string `mapstructure:"password"`
+	Vhost    string `mapstructure:"vhost"`
 }
 
 var ConfigInfo *Config // 此时 ConfigInfo = nil
