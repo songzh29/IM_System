@@ -16,7 +16,7 @@ func StartConversationUpdateConsumer() error {
 	}
 	msgs, err := ch.Consume("q.conversation.update",
 		"",
-		true,
+		false,
 		false,
 		false,
 		false,
@@ -26,18 +26,24 @@ func StartConversationUpdateConsumer() error {
 		return err
 	}
 	go func() {
+		defer ch.Close() // Channel 随 goroutine 结束而关闭
 		for msg := range msgs {
 			var MsgSent model.MqMessage
 			err := json.Unmarshal(msg.Body, &MsgSent)
 			if err != nil {
 				zap.L().Error("JSON反序列化失败", zap.Error(err))
+				msg.Nack(false, false) // multiple=false, requeue=false → 进 DLQ
 				continue
 			}
 			err = repository.UpdateConversation(MsgSent.ConvID, &MsgSent.SendMsg)
 			if err != nil {
 				zap.L().Error("更新消息表出错", zap.Error(err))
+				msg.Nack(false, false) // multiple=false, requeue=false → 进 DLQ
+				continue
 			}
+			msg.Ack(false)
 		}
+		zap.L().Warn("consumer 的 msgs channel 已关闭，消费者退出")
 	}()
 	return nil
 }

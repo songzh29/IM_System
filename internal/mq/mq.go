@@ -18,6 +18,11 @@ func Start() error {
 	if err != nil {
 		return err
 	}
+	//启动消费者，不停的接收消息
+	err = StartConversationUpdateConsumer()
+	if err != nil {
+		return err
+	}
 	return nil
 
 }

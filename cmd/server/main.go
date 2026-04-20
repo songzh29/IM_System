@@ -18,6 +18,7 @@ import (
 	"github.com/songzh29/IM_System/internal/ws"
 	"github.com/songzh29/IM_System/pkg/logger"
 	mysqldb "github.com/songzh29/IM_System/pkg/mysql"
+	"github.com/songzh29/IM_System/pkg/rabbitmq"
 	redisdb "github.com/songzh29/IM_System/pkg/redis"
 	"go.uber.org/zap"
 )
@@ -132,6 +133,10 @@ func main() {
 	err = redisdb.Close()
 	if err != nil {
 		zap.L().Error("redis服务关闭失败:", zap.Error(err))
+	}
+	err = rabbitmq.Close()
+	if err != nil {
+		zap.L().Error("Rabbitmq服务关闭失败:", zap.Error(err))
 	}
 	err = mysqldb.Close()
 	if err != nil {
