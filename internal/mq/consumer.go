@@ -32,16 +32,22 @@ func StartConversationUpdateConsumer() error {
 			err := json.Unmarshal(msg.Body, &MsgSent)
 			if err != nil {
 				zap.L().Error("JSON反序列化失败", zap.Error(err))
-				msg.Nack(false, false) // multiple=false, requeue=false → 进 DLQ
+				if err := msg.Nack(false, false); err != nil {
+					zap.L().Error("ACK 失败", zap.Error(err))
+				} // multiple=false, requeue=false → 进 DLQ
 				continue
 			}
 			err = repository.UpdateConversation(MsgSent.ConvID, &MsgSent.SendMsg)
 			if err != nil {
 				zap.L().Error("更新消息表出错", zap.Error(err))
-				msg.Nack(false, false) // multiple=false, requeue=false → 进 DLQ
+				if err := msg.Nack(false, false); err != nil {
+					zap.L().Error("ACK 失败", zap.Error(err))
+				} // multiple=false, requeue=false → 进 DLQ
 				continue
 			}
-			msg.Ack(false)
+			if err := msg.Ack(false); err != nil {
+				zap.L().Error("ACK 失败", zap.Error(err))
+			}
 		}
 		zap.L().Warn("consumer 的 msgs channel 已关闭，消费者退出")
 	}()

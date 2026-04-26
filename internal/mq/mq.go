@@ -23,6 +23,8 @@ func Start() error {
 	if err != nil {
 		return err
 	}
+	// 后台监听重连
+	go WatchAndReconnect()
 	return nil
 
 }

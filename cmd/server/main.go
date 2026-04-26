@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"errors"
+	"flag"
 	"fmt"
 	"log"
 	"net/http"
@@ -15,9 +16,11 @@ import (
 	"github.com/songzh29/IM_System/config"
 	"github.com/songzh29/IM_System/internal/handler"
 	"github.com/songzh29/IM_System/internal/mq"
+	"github.com/songzh29/IM_System/internal/router"
 	"github.com/songzh29/IM_System/internal/ws"
 	"github.com/songzh29/IM_System/pkg/logger"
 	mysqldb "github.com/songzh29/IM_System/pkg/mysql"
+	"github.com/songzh29/IM_System/pkg/node"
 	"github.com/songzh29/IM_System/pkg/rabbitmq"
 	redisdb "github.com/songzh29/IM_System/pkg/redis"
 	"go.uber.org/zap"
@@ -25,12 +28,22 @@ import (
 
 func main() {
 	// 先初始化配置
+	portFlag := flag.Int("port", 0, "override config port")
+	flag.Parse()
+
 	err := config.Init()
 	if err != nil {
 		log.Panic("配置初始化失败", zap.Error(err))
 	}
+
+	if *portFlag != 0 {
+		config.ConfigInfo.Server.Port = *portFlag
+	}
 	//初始化日志
 	logger.Init()
+
+	//初始化node
+	node.Init()
 
 	//mysql连接
 	err = mysqldb.Init()
@@ -49,6 +62,12 @@ func main() {
 	if err != nil {
 		zap.L().Panic("RabbitMQ初始化失败", zap.Error(err))
 	}
+
+	// 注册跨节点消息发布函数，解决循环导入问题
+	ws.RegisterPublishForward(router.PublishForward)
+
+	// 启动Redis订阅
+	go router.StartSubscribe()
 
 	//gin连接
 	r := gin.Default()
@@ -129,14 +148,17 @@ func main() {
 	// 8. 清理底层资源 (先关 HTTP，最后关数据库)
 	zap.L().Info("HTTP 服务已关闭，开始清理底层资源...")
 
-	// 这里调用 mysql 和 redis 包里的关闭方法
-	err = redisdb.Close()
-	if err != nil {
-		zap.L().Error("redis服务关闭失败:", zap.Error(err))
-	}
+	// 这里调用 mysql、rabbitmq、redis 包里的关闭方法
 	err = rabbitmq.Close()
 	if err != nil {
 		zap.L().Error("Rabbitmq服务关闭失败:", zap.Error(err))
+	}
+	//关闭pub/sub
+	router.StopSubscribe()
+	//再关redis
+	err = redisdb.Close()
+	if err != nil {
+		zap.L().Error("redis服务关闭失败:", zap.Error(err))
 	}
 	err = mysqldb.Close()
 	if err != nil {

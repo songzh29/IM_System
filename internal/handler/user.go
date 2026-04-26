@@ -36,8 +36,8 @@ func WsConnect(c *gin.Context) {
 
 	//设置用户的状态
 	send := make(chan []byte, ws.SendBufferSize)
-	client := ws.Client{UserID: userId, Conn: conn, Send: send, Manager: ws.Manager}
-	ws.Manager.Register(&client)
+	client := &ws.Client{UserID: userId, Conn: conn, Send: send, Manager: ws.Manager}
+	ws.Manager.Register(client)
 
 	//先把离线消息推送给用户
 	client.DeliverUnreadMsg()

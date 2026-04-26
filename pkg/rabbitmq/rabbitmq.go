@@ -10,6 +10,13 @@ import (
 var Conn *amqp.Connection
 
 func Init() error {
+	return Reconnect()
+}
+
+func Reconnect() error {
+	if Conn != nil && !Conn.IsClosed() {
+		Conn.Close()
+	}
 	host := config.ConfigInfo.RabbitMQ.Host
 	password := config.ConfigInfo.RabbitMQ.Password
 	port := config.ConfigInfo.RabbitMQ.Port
@@ -25,6 +32,9 @@ func Init() error {
 }
 
 func Close() error {
+	if Conn == nil || Conn.IsClosed() {
+		return nil
+	}
 	return Conn.Close()
 }
 
