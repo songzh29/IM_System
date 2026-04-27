@@ -205,15 +205,18 @@ func (c *Client) ListenMsg() {
 				continue
 			}
 			// 正常跨实例转发
-			if err := PublishForwardMsg(m.ToUserID, targetNodeID, collectMsgByte); err != nil {
+			err = PublishForwardMsg(m.ToUserID, targetNodeID, collectMsgByte)
+			if err != nil {
 				zap.L().Error("跨实例转发失败", zap.Error(err))
+			} else {
+				zap.L().Info("消息跨实例转发成功", zap.Uint("sender_id", c.UserID), zap.Uint("to_id", m.ToUserID))
 			}
 			continue
 		}
 
 		success := DeliverTotalMsg(targetClient, collectMsgByte)
 		if success {
-			zap.L().Info("消息发送成功", zap.Uint("sender_id", c.UserID))
+			zap.L().Info("消息发送成功", zap.Uint("sender_id", c.UserID), zap.Uint("to_id", m.ToUserID))
 		}
 
 	}

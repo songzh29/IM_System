@@ -154,7 +154,10 @@ func main() {
 		zap.L().Error("Rabbitmq服务关闭失败:", zap.Error(err))
 	}
 	//关闭pub/sub
-	router.StopSubscribe()
+	err = router.StopSubscribe()
+	if err != nil {
+		zap.L().Error("redis sub服务关闭失败:", zap.Error(err))
+	}
 	//再关redis
 	err = redisdb.Close()
 	if err != nil {

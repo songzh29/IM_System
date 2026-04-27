@@ -3,7 +3,6 @@ package router
 import (
 	"context"
 	"encoding/json"
-	"time"
 
 	"github.com/redis/go-redis/v9"
 	"github.com/songzh29/IM_System/internal/ws"
@@ -16,9 +15,7 @@ var Pubsub *redis.PubSub
 
 // 开启redis订阅
 func StartSubscribe() {
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-	defer cancel()
-	Pubsub = redisdb.Rdb.Subscribe(ctx, ForwardChannel)
+	Pubsub = redisdb.Rdb.Subscribe(context.Background(), ForwardChannel)
 	ch := Pubsub.Channel()
 	nodeID := node.GetNodeID()
 	zap.L().Info("已经成功订阅Redis频道",
@@ -45,8 +42,9 @@ func handlerForwardMsg(msg *redis.Message) {
 }
 
 // 关闭redis订阅
-func StopSubscribe() {
+func StopSubscribe() error {
 	if Pubsub != nil {
-		Pubsub.Close()
+		return Pubsub.Close()
 	}
+	return nil
 }
