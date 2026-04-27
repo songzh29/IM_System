@@ -21,6 +21,9 @@ import (
 const (
 	// 发送缓冲区大小
 	SendBufferSize = 256
+	// 定义客户端发往服务端的指令类型 (Action)
+	ActionChat = "chat" // 发送普通聊天消息
+	ActionAck  = "ack"  // 客户端签收回执 (ACK)
 )
 
 type Client struct {
@@ -31,10 +34,23 @@ type Client struct {
 	muWrite sync.RWMutex
 }
 
-type JsonMessage struct {
+// 设置消息信封
+type ClientMessage struct {
+	Action string          `json:"action"` // 动作类型，决定了如何解析 Data
+	Data   json.RawMessage `json:"data"`   // 具体的数据载荷，延迟解析
+}
+
+// 普通聊天信息
+type ChatMsgPayload struct {
 	ClientMsgID string `json:"client_msg_id"`
 	ToUserID    uint   `json:"to_user_id"`
 	Content     string `json:"content"`
+}
+
+// ACK信息
+type AckMsgPayload struct {
+	ServerMsgID uint `json:"server_msg_id" `
+	ConvID      uint `json:"conv_id" ` // 会话ID (可选，方便服务端快速定位)
 }
 
 type CollectMessage struct {
@@ -78,149 +94,173 @@ func (c *Client) ListenMsg() {
 			return
 		}
 
-		// 解析 JSON
-		var m JsonMessage
-		if err := json.Unmarshal(msg, &m); err != nil {
+		var clientMsg ClientMessage
+		if err := json.Unmarshal(msg, &clientMsg); err != nil {
 			zap.L().Error("json解析失败:", zap.Error(err))
 			continue
 		}
-		//查看用户是否存在
-		targetUser, err := repository.GetUserByUserID(m.ToUserID)
-
-		if err == nil && targetUser == nil {
-			zap.L().Warn("目标用户不存在",
-				zap.Uint("sender_id", c.UserID),
-				zap.Uint("to_user_id", m.ToUserID),
-				zap.Error(err),
-			)
-			continue
-		} else if err != nil {
-			zap.L().Error("查找目标用户出错",
-				zap.Uint("sender_id", c.UserID),
-				zap.Uint("to_user_id", m.ToUserID),
-				zap.Error(err),
-			)
-			continue
-		}
-
-		//查看用户之间有没有会话
-		convID, err := repository.CheckConversationExist(c.UserID, targetUser.ID, 1)
-		if err == nil && convID == 0 {
-			zap.L().Warn("两人之间无对话",
-				zap.Uint("sender_id", c.UserID),
-				zap.Uint("to_user_id", m.ToUserID),
-			)
-		} else if err != nil {
-			zap.L().Error("查找对话失败",
-				zap.Uint("sender_id", c.UserID),
-				zap.Uint("to_user_id", m.ToUserID),
-				zap.Error(err),
-			)
-			continue
-		}
-
-		//没有对话则创建对话
-		if convID == 0 {
-			zap.L().Info("正在创建对话")
-			convName := fmt.Sprintf("%d & %d", c.UserID, targetUser.ID)
-			conv := model.Conversation{Type: 1, Name: convName, CreatorID: c.UserID}
-			//存入MySQL
-			err := repository.CreateConversation(&conv)
-			if err != nil {
-				zap.L().Error("创建对话失败", zap.Error(err))
-				continue
-			}
-			zap.L().Info("对话创建成功")
-			convID = conv.ID
-
-			//存入redis
-			err = repository.CacheConversationID(c.UserID, targetUser.ID, 1, convID)
-			if err != nil {
-				zap.L().Error("Redis写入对话失败", zap.Error(err))
-			}
-
-			//将两人加入会话成员表（拉入会话）
-			err = repository.AddMember(conv.ID, c.UserID, 0)
-			if err != nil {
-				zap.L().Error("加入会话失败", zap.Uint("user_id", c.UserID), zap.Error(err))
-				continue
-			}
-			err = repository.AddMember(conv.ID, targetUser.ID, 0)
-			if err != nil {
-				zap.L().Error("加入会话失败", zap.Uint("user_id", targetUser.ID), zap.Error(err))
-				continue
-			}
-		}
-
-		//消息入库
-		sendMsg := model.Message{ConversationID: convID, SenderID: c.UserID, MsgType: 1, Content: m.Content, ClientMsgID: m.ClientMsgID}
-		err = repository.CreateMessage(&sendMsg)
-		if err != nil {
-			zap.L().Error("消息入库失败", zap.Error(err))
-			continue
-		}
-
-		// //更新会话表
-		// err = repository.UpdateConversation(convID, &sendMsg)
-		// if err != nil {
-		// 	zap.L().Error("会话表更新失败", zap.Error(err))
-		// 	continue
-		// }
-		// MQ生产端推送消息
-		mqMsg := &model.MqMessage{ConvID: convID, SendMsg: sendMsg}
-		mq.PublishWithFallback(mqMsg)
-
-		//把已读消息更新到自己发送的消息，自己发送的肯定是已读,要是出错了也没大事
-		err = repository.UpdateLastReadMsgID(convID, c.UserID, sendMsg.ID)
-		if err != nil {
-			zap.L().Error("尝试将已读消息更新为自己刚刚发送的消息ID,但是更新失败", zap.Error(err))
-			// continue
-		}
-
-		//消息序列化
-		collectMsg := CollectMessage{SenderID: c.UserID, ConversationID: convID, MsgID: sendMsg.ID, Content: m.Content}
-		collectMsgByte, err := json.Marshal(collectMsg)
-		if err != nil {
-			zap.L().Error("消息序列化失败", zap.Error(err))
-			continue
-		}
-
-		// 找目标用户有没有在线
-		c.Manager.mu.RLock()
-		targetClient, ok := c.Manager.clients[m.ToUserID]
-		c.Manager.mu.RUnlock()
-		if !ok {
-			targetNodeID, err := GetOnlineNode(m.ToUserID)
-			if err != nil {
-				zap.L().Warn("查询在线状态失败,降级为离线消息", zap.Error(err))
-				continue
-			}
-			if targetNodeID == "" {
-				zap.L().Info("用户离线", zap.Uint("user_id", m.ToUserID))
-				continue
-			} else if targetNodeID == node.GetNodeID() {
-				// 异常情况:Redis 说在自己实例,但本地 map 没有
-				// 可能用户刚好下线,Redis TTL 还没过期
-				zap.L().Warn("Redis 显示在线但本地无连接", zap.Uint("user_id", m.ToUserID))
-				continue
-			}
-			// 正常跨实例转发
-			err = PublishForwardMsg(m.ToUserID, targetNodeID, collectMsgByte)
-			if err != nil {
-				zap.L().Error("跨实例转发失败", zap.Error(err))
-			} else {
-				zap.L().Info("消息跨实例转发成功", zap.Uint("sender_id", c.UserID), zap.Uint("to_id", m.ToUserID))
-			}
-			continue
-		}
-
-		success := DeliverTotalMsg(targetClient, collectMsgByte)
-		if success {
-			zap.L().Info("消息发送成功", zap.Uint("sender_id", c.UserID), zap.Uint("to_id", m.ToUserID))
+		switch clientMsg.Action {
+		case ActionChat:
+			c.handleChatMsg(clientMsg.Data)
+		case ActionAck:
+			c.handleACKMsg(clientMsg.Data)
+		default:
+			zap.L().Warn("Action类型错误:")
 		}
 
 	}
 
+}
+
+func (c *Client) handleChatMsg(msg []byte) {
+	// 解析 JSON
+	var m ChatMsgPayload
+	if err := json.Unmarshal(msg, &m); err != nil {
+		zap.L().Error("Chat消息json解析失败:", zap.Error(err))
+		return
+	}
+	//查看用户是否存在
+	targetUser, err := repository.GetUserByUserID(m.ToUserID)
+
+	if err == nil && targetUser == nil {
+		zap.L().Warn("目标用户不存在",
+			zap.Uint("sender_id", c.UserID),
+			zap.Uint("to_user_id", m.ToUserID),
+			zap.Error(err),
+		)
+		return
+	} else if err != nil {
+		zap.L().Error("查找目标用户出错",
+			zap.Uint("sender_id", c.UserID),
+			zap.Uint("to_user_id", m.ToUserID),
+			zap.Error(err),
+		)
+		return
+	}
+
+	//查看用户之间有没有会话
+	convID, err := repository.CheckConversationExist(c.UserID, targetUser.ID, 1)
+	if err != nil {
+		zap.L().Error("查找对话失败",
+			zap.Uint("sender_id", c.UserID),
+			zap.Uint("to_user_id", m.ToUserID),
+			zap.Error(err),
+		)
+		return
+	}
+
+	//没有对话则创建对话
+	if convID == 0 {
+		zap.L().Info("正在创建对话")
+		convName := fmt.Sprintf("%d & %d", c.UserID, targetUser.ID)
+		conv := model.Conversation{Type: 1, Name: convName, CreatorID: c.UserID}
+		//存入MySQL
+		err := repository.CreateConversation(&conv)
+		if err != nil {
+			zap.L().Error("创建对话失败", zap.Error(err))
+			return
+		}
+		zap.L().Info("对话创建成功")
+		convID = conv.ID
+
+		//存入redis
+		err = repository.CacheConversationID(c.UserID, targetUser.ID, 1, convID)
+		if err != nil {
+			zap.L().Error("Redis写入对话失败", zap.Error(err))
+		}
+
+		//将两人加入会话成员表（拉入会话）
+		err = repository.AddMember(conv.ID, c.UserID, 0)
+		if err != nil {
+			zap.L().Error("加入会话失败", zap.Uint("user_id", c.UserID), zap.Error(err))
+			return
+		}
+		err = repository.AddMember(conv.ID, targetUser.ID, 0)
+		if err != nil {
+			zap.L().Error("加入会话失败", zap.Uint("user_id", targetUser.ID), zap.Error(err))
+			return
+		}
+	}
+
+	//消息入库
+	sendMsg := model.Message{ConversationID: convID, SenderID: c.UserID, MsgType: 1, Content: m.Content, ClientMsgID: m.ClientMsgID}
+	err = repository.CreateMessage(&sendMsg)
+	if err != nil {
+		zap.L().Error("消息入库失败", zap.Error(err))
+		return
+	}
+
+	// //更新会话表
+	// err = repository.UpdateConversation(convID, &sendMsg)
+	// if err != nil {
+	// 	zap.L().Error("会话表更新失败", zap.Error(err))
+	// 	continue
+	// }
+	// MQ生产端推送消息
+	mqMsg := &model.MqMessage{ConvID: convID, SendMsg: sendMsg}
+	mq.PublishWithFallback(mqMsg)
+
+	//把已读消息更新到自己发送的消息，自己发送的肯定是已读,要是出错了也没大事
+	err = repository.UpdateLastReadMsgID(convID, c.UserID, sendMsg.ID)
+	if err != nil {
+		zap.L().Error("尝试将已读消息更新为自己刚刚发送的消息ID,但是更新失败", zap.Error(err))
+		// continue
+	}
+
+	//消息序列化
+	collectMsg := CollectMessage{SenderID: c.UserID, ConversationID: convID, MsgID: sendMsg.ID, Content: m.Content}
+	collectMsgByte, err := json.Marshal(collectMsg)
+	if err != nil {
+		zap.L().Error("消息序列化失败", zap.Error(err))
+		return
+	}
+
+	// 找目标用户有没有在线
+	c.Manager.mu.RLock()
+	targetClient, ok := c.Manager.clients[m.ToUserID]
+	c.Manager.mu.RUnlock()
+	if !ok {
+		targetNodeID, err := GetOnlineNode(m.ToUserID)
+		if err != nil {
+			zap.L().Warn("查询在线状态失败,降级为离线消息", zap.Error(err))
+			return
+		}
+		if targetNodeID == "" {
+			zap.L().Info("用户离线", zap.Uint("user_id", m.ToUserID))
+			return
+		} else if targetNodeID == node.GetNodeID() {
+			// 异常情况:Redis 说在自己实例,但本地 map 没有
+			// 可能用户刚好下线,Redis TTL 还没过期
+			zap.L().Warn("Redis 显示在线但本地无连接", zap.Uint("user_id", m.ToUserID))
+			return
+		}
+		// 正常跨实例转发
+		err = PublishForwardMsg(m.ToUserID, targetNodeID, collectMsgByte)
+		if err != nil {
+			zap.L().Error("跨实例转发失败", zap.Error(err))
+		} else {
+			zap.L().Info("消息跨实例转发成功", zap.Uint("sender_id", c.UserID), zap.Uint("to_id", m.ToUserID))
+		}
+		return
+	}
+
+	success := DeliverTotalMsg(targetClient, collectMsgByte)
+	if success {
+		zap.L().Info("消息发送成功", zap.Uint("sender_id", c.UserID), zap.Uint("to_id", m.ToUserID))
+	}
+}
+
+func (c *Client) handleACKMsg(msg []byte) {
+	var m AckMsgPayload
+	if err := json.Unmarshal(msg, &m); err != nil {
+		zap.L().Error("ACK消息json解析失败:", zap.Error(err))
+		return
+	}
+	err := repository.UpdateLastReadMsgID(m.ConvID, c.UserID, m.ServerMsgID)
+	if err != nil {
+		zap.L().Error("更新消息last_read_msg_id失败:", zap.Error(err))
+		return
+	}
 }
 
 func DeliverTotalMsg(targetClient *Client, msg []byte) bool {
@@ -265,10 +305,16 @@ func (c *Client) pingLoop() {
 	defer ticker.Stop()
 
 	for range ticker.C {
-		c.muWrite.Lock()
-		c.Conn.SetWriteDeadline(time.Now().Add(writeWait))
-		err := c.Conn.WriteControl(websocket.PingMessage, []byte{}, time.Now().Add(writeWait))
-		c.muWrite.Unlock()
+		// 不需要加锁 (muWrite)
+		// gorilla/websocket 官方文档明确说明：WriteControl 可以与其他方法并发调用，内部已做线程安全处理。
+		// 如果这里加锁，反而会被发大消息的 WriteMessage 阻塞，导致心跳发不出去而断开。
+		// 直接调用 WriteControl，它用第三个参数控制自己的超时即可
+
+		err := c.Conn.WriteControl(
+			websocket.PingMessage,
+			[]byte{},
+			time.Now().Add(writeWait), // WriteControl 自己独享的超时控制
+		)
 		if err != nil {
 			zap.L().Warn("发送 ping 失败,连接可能已断开", zap.Uint("user_id", c.UserID), zap.Error(err))
 			return
@@ -282,17 +328,10 @@ func (c *Client) DeliverMsg() {
 	go c.pingLoop()
 
 	for msg := range c.Send {
-		// 消息反序列化，准备进行最后阅读消息的更新
-		collectMsg := CollectMessage{}
-		err := json.Unmarshal(msg, &collectMsg)
-		if err != nil {
-			zap.L().Error("消息反序列化失败", zap.Error(err))
-			continue
-		}
 		//把消息发送给用户
 		c.muWrite.Lock()
 		c.Conn.SetWriteDeadline(time.Now().Add(writeWait))
-		err = c.Conn.WriteMessage(websocket.TextMessage, msg)
+		err := c.Conn.WriteMessage(websocket.TextMessage, msg)
 		c.muWrite.Unlock()
 		if err != nil {
 			zap.L().Error("消息发送失败",
@@ -300,16 +339,6 @@ func (c *Client) DeliverMsg() {
 				zap.Error(err))
 			return
 		}
-		// //如果用户成功接受了消息，则更新last_read_msg_id
-		// err = repository.UpdateLastReadMsgID(collectMsg.ConversationID, c.UserID, collectMsg.MsgID)
-		// if err != nil {
-		// 	if errors.Is(err, repository.ErrUpdateNoneLastReadMsg) {
-		// 		zap.L().Warn("没有可更新消息")
-		// 	}
-		// 	zap.L().Error("消息更新失败", zap.Uint("target_id", c.UserID), zap.Error(err))
-		// 	continue
-		// }
-
 	}
 }
 
@@ -323,9 +352,8 @@ func (c *Client) DeliverUnreadMsg() {
 	}
 	if len(unreadMsgs) == 0 {
 		zap.L().Info("暂无离线消息")
+		return
 	}
-	//创建一个map，key和value分别对应conv_id和max_msg_id
-	msgMap := make(map[uint]uint)
 	for _, msg := range unreadMsgs {
 		sendMsg := CollectMessage{
 			MsgID:          msg.ID,
@@ -356,17 +384,5 @@ func (c *Client) DeliverUnreadMsg() {
 			)
 			return
 		}
-		if msgMap[msg.ConversationID] < msg.ID {
-			msgMap[msg.ConversationID] = msg.ID
-		}
-
 	}
-	for convID, lastmsgID := range msgMap {
-		err := repository.UpdateLastReadMsgID(convID, c.UserID, lastmsgID)
-		if err != nil {
-			zap.L().Error("数据库更新last_read_msg_id失败", zap.Error(err))
-			return
-		}
-	}
-
 }

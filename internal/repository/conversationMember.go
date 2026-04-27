@@ -15,7 +15,6 @@ import (
 	"gorm.io/gorm"
 )
 
-var ErrUpdateNoneLastReadMsg = errors.New("没有更新任何数据")
 var ErrNoConvRecord = errors.New("会话记录不存在")
 
 func AddMember(conversationID uint, userID uint, role int) error {
@@ -59,12 +58,11 @@ func GetConversationsByUserID(userID uint) ([]model.Conversation, error) {
 }
 
 func UpdateLastReadMsgID(conversationID uint, userID uint, msgID uint) error {
-	result := mysqldb.DB.Model(&model.ConversationMember{}).Where("user_id = ? AND conversation_id = ?", userID, conversationID).Update("last_read_msg_id", msgID)
+	result := mysqldb.DB.Model(&model.ConversationMember{}).
+		Where("user_id = ? AND conversation_id = ? AND last_read_msg_id < ?", userID, conversationID, msgID).
+		Update("last_read_msg_id", msgID)
 	if result.Error != nil {
 		return result.Error // 真正的数据库错误
-	}
-	if result.RowsAffected == 0 {
-		return ErrUpdateNoneLastReadMsg
 	}
 	return nil
 }
