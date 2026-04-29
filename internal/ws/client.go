@@ -13,6 +13,7 @@ import (
 	"github.com/songzh29/IM_System/internal/model"
 	"github.com/songzh29/IM_System/internal/mq"
 	"github.com/songzh29/IM_System/internal/repository"
+	"github.com/songzh29/IM_System/pkg/metrics"
 	"github.com/songzh29/IM_System/pkg/node"
 	redisdb "github.com/songzh29/IM_System/pkg/redis"
 	"go.uber.org/zap"
@@ -105,7 +106,9 @@ func (c *Client) ListenMsg() {
 		case ActionAck:
 			c.handleACKMsg(clientMsg.Data)
 		default:
-			zap.L().Warn("Action类型错误:")
+			zap.L().Warn("收到未知 Action 类型",
+				zap.String("action", clientMsg.Action),
+				zap.Uint("user_id", c.UserID))
 		}
 
 	}
@@ -186,10 +189,11 @@ func (c *Client) handleChatMsg(msg []byte) {
 	sendMsg := model.Message{ConversationID: convID, SenderID: c.UserID, MsgType: 1, Content: m.Content, ClientMsgID: m.ClientMsgID}
 	err = repository.CreateMessage(&sendMsg)
 	if err != nil {
+		metrics.MessagesPersistedTotal.WithLabelValues("failure").Inc()
 		zap.L().Error("消息入库失败", zap.Error(err))
 		return
 	}
-
+	metrics.MessagesPersistedTotal.WithLabelValues("success").Inc()
 	// //更新会话表
 	// err = repository.UpdateConversation(convID, &sendMsg)
 	// if err != nil {
@@ -222,24 +226,32 @@ func (c *Client) handleChatMsg(msg []byte) {
 	if !ok {
 		targetNodeID, err := GetOnlineNode(m.ToUserID)
 		if err != nil {
+			//redis查找失败
+			metrics.MessagesFailedTotal.WithLabelValues("redis_lookup_failed").Inc()
 			zap.L().Warn("查询在线状态失败,降级为离线消息", zap.Error(err))
 			return
 		}
 		if targetNodeID == "" {
+			metrics.MessagesDeliveredTotal.WithLabelValues("offline").Inc()
 			zap.L().Info("用户离线", zap.Uint("user_id", m.ToUserID))
 			return
 		} else if targetNodeID == node.GetNodeID() {
 			// 异常情况:Redis 说在自己实例,但本地 map 没有
 			// 可能用户刚好下线,Redis TTL 还没过期
+			metrics.MessagesFailedTotal.WithLabelValues("ghost_online").Inc() // ← 异常
 			zap.L().Warn("Redis 显示在线但本地无连接", zap.Uint("user_id", m.ToUserID))
 			return
 		}
 		// 正常跨实例转发
 		err = PublishForwardMsg(m.ToUserID, targetNodeID, collectMsgByte)
 		if err != nil {
+			metrics.MessagesFailedTotal.WithLabelValues("forward_publish_failed").Inc() // 跨实例失败
 			zap.L().Error("跨实例转发失败", zap.Error(err))
 		} else {
 			zap.L().Info("消息跨实例转发成功", zap.Uint("sender_id", c.UserID), zap.Uint("to_id", m.ToUserID))
+			//设置成功投递消息+1
+			metrics.MessagesDeliveredTotal.WithLabelValues("cross_instance").Inc() // 跨实例成功
+			metrics.ForwardPublishedTotal.Inc()                                    //pub了一条消息
 		}
 		return
 	}
@@ -247,6 +259,10 @@ func (c *Client) handleChatMsg(msg []byte) {
 	success := DeliverTotalMsg(targetClient, collectMsgByte)
 	if success {
 		zap.L().Info("消息发送成功", zap.Uint("sender_id", c.UserID), zap.Uint("to_id", m.ToUserID))
+		//设置成功投递消息+1
+		metrics.MessagesDeliveredTotal.WithLabelValues("local").Inc() // 本地
+	} else {
+		metrics.MessagesFailedTotal.WithLabelValues("chan_full").Inc() // ← chan 满
 	}
 }
 

@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/gorilla/websocket"
+	"github.com/songzh29/IM_System/pkg/metrics"
 	"github.com/songzh29/IM_System/pkg/node"
 	redisdb "github.com/songzh29/IM_System/pkg/redis"
 	"go.uber.org/zap"
@@ -58,6 +59,8 @@ func (m *ConnManager) Register(c *Client) {
 		// 本地已经注册了,这里只打日志不 return
 		zap.L().Error("写在线状态到 Redis 失败", zap.Uint("user_id", c.UserID), zap.Error(err))
 	}
+	//设置在线人数+1
+	metrics.OnlineUsers.Inc()
 }
 
 func (m *ConnManager) Unregister(c *Client) {
@@ -81,6 +84,8 @@ func (m *ConnManager) Unregister(c *Client) {
 	if err != nil {
 		zap.L().Error("Redis删除用户在线状态失败", zap.Uint("user_id", c.UserID), zap.Error(err))
 	}
+	//设置在线人数-1
+	metrics.OnlineUsers.Dec()
 }
 
 func (m *ConnManager) CloseAll() {

@@ -13,12 +13,14 @@ import (
 	"time"
 
 	"github.com/gin-gonic/gin"
+	"github.com/prometheus/client_golang/prometheus/promhttp"
 	"github.com/songzh29/IM_System/config"
 	"github.com/songzh29/IM_System/internal/handler"
 	"github.com/songzh29/IM_System/internal/mq"
 	"github.com/songzh29/IM_System/internal/router"
 	"github.com/songzh29/IM_System/internal/ws"
 	"github.com/songzh29/IM_System/pkg/logger"
+	"github.com/songzh29/IM_System/pkg/metrics"
 	mysqldb "github.com/songzh29/IM_System/pkg/mysql"
 	"github.com/songzh29/IM_System/pkg/node"
 	"github.com/songzh29/IM_System/pkg/rabbitmq"
@@ -63,18 +65,44 @@ func main() {
 		zap.L().Panic("RabbitMQ初始化失败", zap.Error(err))
 	}
 
+	//启动Prometheus
+	metrics.Init()
+
 	// 注册跨节点消息发布函数，解决循环导入问题
 	ws.RegisterPublishForward(router.PublishForward)
 
 	// 启动Redis订阅
 	go router.StartSubscribe()
 
+	go func() {
+		ctx := context.Background()
+		var count float64 = 0
+		// 每次扫描 1000 个 key
+		iter := redisdb.Rdb.Scan(ctx, 0, "online:user:*", 1000).Iterator()
+
+		// 循环迭代直到结束
+		for iter.Next(ctx) {
+			count++
+		}
+
+		if err := iter.Err(); err != nil {
+			fmt.Println("查询 Redis 失败:", err)
+			return
+		}
+
+		// 将统计到的数量设置到 Prometheus 的 Gauge 中
+		metrics.OnlineUsersRedis.Set(count)
+	}()
+
 	//gin连接
 	r := gin.Default()
 	r.LoadHTMLGlob("../../template/*.html")
 
+	r.GET("/metrics", gin.WrapH(promhttp.Handler()))
+
 	public := r.Group("/public")
 	{
+
 		public.GET("/", func(ctx *gin.Context) {
 			ctx.JSON(200, gin.H{"msg": "hello!!"})
 		})

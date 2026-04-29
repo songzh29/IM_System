@@ -4,6 +4,8 @@ import (
 	"context"
 	"encoding/json"
 
+	"github.com/songzh29/IM_System/pkg/metrics"
+
 	"github.com/redis/go-redis/v9"
 	"github.com/songzh29/IM_System/internal/ws"
 	"github.com/songzh29/IM_System/pkg/node"
@@ -28,6 +30,9 @@ func StartSubscribe() {
 }
 
 func handlerForwardMsg(msg *redis.Message) {
+	// sub数+1
+	metrics.ForwardReceivedTotal.Inc()
+
 	msgBody := []byte(msg.Payload)
 	recieveMsg := ForwardMessage{}
 	if err := json.Unmarshal([]byte(msgBody), &recieveMsg); err != nil {
