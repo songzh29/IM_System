@@ -74,24 +74,36 @@ func main() {
 	// 启动Redis订阅
 	go router.StartSubscribe()
 
+	// goroutine 1:Redis SCAN 在线用户数
 	go func() {
-		ctx := context.Background()
-		var count float64 = 0
-		// 每次扫描 1000 个 key
-		iter := redisdb.Rdb.Scan(ctx, 0, "online:user:*", 1000).Iterator()
-
-		// 循环迭代直到结束
-		for iter.Next(ctx) {
-			count++
+		ticker := time.NewTicker(30 * time.Second)
+		defer ticker.Stop()
+		for {
+			ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+			var count float64 = 0
+			iter := redisdb.Rdb.Scan(ctx, 0, "online:user:*", 1000).Iterator()
+			for iter.Next(ctx) {
+				count++
+			}
+			if err := iter.Err(); err != nil {
+				zap.L().Error("SCAN online:user:* 失败", zap.Error(err))
+			} else {
+				metrics.OnlineUsersRedis.Set(count)
+			}
+			cancel()
+			<-ticker.C
 		}
+	}()
 
-		if err := iter.Err(); err != nil {
-			fmt.Println("查询 Redis 失败:", err)
-			return
+	// goroutine 2:Send chan 占用率采样
+	go func() {
+		ticker := time.NewTicker(5 * time.Second)
+		defer ticker.Stop()
+		for range ticker.C {
+			ws.Manager.SnapshotSendChanUsage(func(u float64) {
+				metrics.SendChanUsage.Observe(u)
+			})
 		}
-
-		// 将统计到的数量设置到 Prometheus 的 Gauge 中
-		metrics.OnlineUsersRedis.Set(count)
 	}()
 
 	//gin连接

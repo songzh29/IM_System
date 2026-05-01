@@ -1,0 +1,9 @@
+metric,value
+duration_seconds,32.0
+total_sent,592
+total_received,592
+send_errors,0
+connect_errors,0
+p50_ms,37.91
+p95_ms,47.31
+p99_ms,89.10

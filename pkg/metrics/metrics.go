@@ -40,14 +40,14 @@ var (
 	// PublishForward 成功后 Inc
 	ForwardPublishedTotal = prometheus.NewCounter(
 		prometheus.CounterOpts{
-			Name: "im_redis_pub",
+			Name: "im_forward_published_total",
 			Help: "total numbers of Redis published",
 		})
 
 	// handlerForwardMsg 入口 Inc(无论本节点是否目标)
 	ForwardReceivedTotal = prometheus.NewCounter(
 		prometheus.CounterOpts{
-			Name: "im_redis_sub",
+			Name: "im_forward_received_total",
 			Help: "total numbers of every Redis node received",
 		})
 
@@ -63,7 +63,7 @@ var (
 		prometheus.HistogramOpts{
 			Name:    "im_send_channel_histogram",
 			Help:    "Histogram of client send channel",
-			Buckets: []float64{10, 50, 100, 150, 200, 250, 256},
+			Buckets: []float64{0, 1, 5, 20, 50, 100, 150, 200, 230, 245, 252, 256},
 		})
 )
 
@@ -83,4 +83,8 @@ func Init() {
 	MessagesDeliveredTotal.WithLabelValues("local").Add(0)
 	MessagesDeliveredTotal.WithLabelValues("cross_instance").Add(0)
 	MessagesDeliveredTotal.WithLabelValues("offline").Add(0)
+	MessagesFailedTotal.WithLabelValues("chan_full").Add(0)
+	MessagesFailedTotal.WithLabelValues("forward_publish_failed").Add(0)
+	MessagesFailedTotal.WithLabelValues("redis_lookup_failed").Add(0)
+	MessagesFailedTotal.WithLabelValues("ghost_online").Add(0)
 }

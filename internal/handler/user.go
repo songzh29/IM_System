@@ -93,8 +93,9 @@ func Login(c *gin.Context) {
 	// c.SetCookie("token", token, 72*3600, "/", "localhost", false, true)
 	zap.L().Info("用户登录成功", zap.String("username", user.Username))
 	c.JSON(200, gin.H{
-		"msg":   "登录成功",
-		"token": token,
+		"msg":     "登录成功",
+		"token":   token,
+		"user_id": userID, // ← 为了压测加的
 	})
 }
 

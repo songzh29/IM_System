@@ -1,55 +1,68 @@
 package logger
 
 import (
+	"fmt"
 	"os"
 
 	"github.com/songzh29/IM_System/config"
 	"go.uber.org/zap"
 	"go.uber.org/zap/zapcore"
+	"gopkg.in/natefinch/lumberjack.v2" // ← 日志切割库
 )
 
-// L 是全局 Logger，在业务代码中直接 logger.L.Info(...) 调用
 var L *zap.Logger
 
-// Init 初始化日志配置
 func Init() {
 	level := config.ConfigInfo.Zap.Level
 	isDev := config.ConfigInfo.Zap.IsDev
 
-	var encoder zapcore.Encoder
-
 	// 1. 配置编码器
 	encoderConfig := zap.NewProductionEncoderConfig()
-	encoderConfig.EncodeTime = zapcore.ISO8601TimeEncoder   // 时间格式
-	encoderConfig.EncodeLevel = zapcore.CapitalLevelEncoder // 级别大写
+	encoderConfig.EncodeTime = zapcore.ISO8601TimeEncoder
+	encoderConfig.EncodeLevel = zapcore.CapitalLevelEncoder
 
+	var consoleEncoder, fileEncoder zapcore.Encoder
 	if isDev {
-		// 开发环境：彩色终端输出
-		encoderConfig.EncodeLevel = zapcore.CapitalColorLevelEncoder
-		encoder = zapcore.NewConsoleEncoder(encoderConfig)
+		// 开发环境:控制台用彩色
+		consoleEncoderConfig := encoderConfig
+		consoleEncoderConfig.EncodeLevel = zapcore.CapitalColorLevelEncoder
+		consoleEncoder = zapcore.NewConsoleEncoder(consoleEncoderConfig)
+		// 文件用纯文本
+		fileEncoder = zapcore.NewConsoleEncoder(encoderConfig)
 	} else {
-		// 生产环境：标准 JSON 输出
-		encoder = zapcore.NewJSONEncoder(encoderConfig)
+		// 生产环境:都用 JSON
+		consoleEncoder = zapcore.NewJSONEncoder(encoderConfig)
+		fileEncoder = zapcore.NewJSONEncoder(encoderConfig)
 	}
 
-	// 2. 设置日志级别
+	// 2. 解析日志级别
 	var zapLevel zapcore.Level
 	if err := zapLevel.UnmarshalText([]byte(level)); err != nil {
 		zapLevel = zap.InfoLevel
 	}
+	filename := fmt.Sprintf("logs/im_system_%d.log", config.ConfigInfo.Server.Port)
 
-	// 3. 构建 Core
-	core := zapcore.NewCore(encoder, zapcore.AddSync(os.Stdout), zapLevel)
+	// 3. 文件 writer(带切割)
+	fileWriter := zapcore.AddSync(&lumberjack.Logger{
+		Filename:   filename, // 日志文件路径
+		MaxSize:    100,      // 单文件最大 MB
+		MaxBackups: 10,       // 保留最多旧文件数
+		MaxAge:     7,        // 保留天数
+		Compress:   true,     // 是否压缩
+	})
 
-	// 4. 生成实例
+	// 4. 构建多 Core
+	fileCore := zapcore.NewCore(fileEncoder, fileWriter, zapLevel)
+	// 控制台只打 Warn 及以上
+	consoleCore := zapcore.NewCore(consoleEncoder, zapcore.AddSync(os.Stdout), zapcore.ErrorLevel)
+
+	core := zapcore.NewTee(fileCore, consoleCore) // ← 关键:Tee 把日志同时分发到两个 core
+
+	// 5. 生成实例
 	L = zap.New(core, zap.AddCaller(), zap.AddCallerSkip(0))
-	zap.L()
-
-	// 替换官方全局变量,以后可直接通过zap.L()使用
 	zap.ReplaceGlobals(L)
 }
 
-// Sync 刷新缓冲区，建议在 main 函数退出前执行
 func Sync() {
 	_ = L.Sync()
 }

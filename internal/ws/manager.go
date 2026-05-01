@@ -136,3 +136,12 @@ func (m *ConnManager) GetClientByUserID(userID uint) (*Client, bool) {
 	m.mu.RUnlock()
 	return client, exists
 }
+
+// 在 manager.go
+func (m *ConnManager) SnapshotSendChanUsage(observer func(usage float64)) {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	for _, c := range m.clients {
+		observer(float64(len(c.Send)))
+	}
+}

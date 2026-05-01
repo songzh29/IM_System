@@ -59,6 +59,7 @@ type CollectMessage struct {
 	ConversationID uint   `json:"conversation_id"`
 	Content        string `json:"content"`
 	MsgID          uint   `json:"msg_id"`
+	ClientMsgID    string `json:"client_msg_id"` // ← 为了压测加
 }
 
 var Upgrader = websocket.Upgrader{
@@ -116,12 +117,32 @@ func (c *Client) ListenMsg() {
 }
 
 func (c *Client) handleChatMsg(msg []byte) {
+	var t0, t1, t2, t3, t4, t5, t6, t7 time.Time // 各阶段时间戳
+	deliveryPath := "unknown"
+
+	defer func() {
+		t7 = time.Now()
+		zap.L().Info("消息处理耗时",
+			zap.Float64("parse_json", float64(t1.Sub(t0).Milliseconds())), // ← 加这一行
+			zap.Float64("search_user", float64(t2.Sub(t1).Milliseconds())),
+			zap.Float64("search_or_create_conv", float64(t3.Sub(t2).Milliseconds())),
+			zap.Float64("create_msg", float64(t4.Sub(t3).Milliseconds())),
+			zap.Float64("mq_publish", float64(t5.Sub(t4).Milliseconds())),
+			zap.Float64("update_self_read", float64(t6.Sub(t5).Milliseconds())),
+			zap.String("delivery_path", deliveryPath),
+			zap.Float64("deliver_total", float64(t7.Sub(t6).Milliseconds())),
+			zap.Float64("total", float64(time.Since(t0).Milliseconds())),
+		)
+	}()
+	t0 = time.Now()
 	// 解析 JSON
 	var m ChatMsgPayload
 	if err := json.Unmarshal(msg, &m); err != nil {
 		zap.L().Error("Chat消息json解析失败:", zap.Error(err))
 		return
 	}
+	t1 = time.Now()
+
 	//查看用户是否存在
 	targetUser, err := repository.GetUserByUserID(m.ToUserID)
 
@@ -140,6 +161,7 @@ func (c *Client) handleChatMsg(msg []byte) {
 		)
 		return
 	}
+	t2 = time.Now()
 
 	//查看用户之间有没有会话
 	convID, err := repository.CheckConversationExist(c.UserID, targetUser.ID, 1)
@@ -184,8 +206,10 @@ func (c *Client) handleChatMsg(msg []byte) {
 			return
 		}
 	}
+	t3 = time.Now()
 
 	//消息入库
+
 	sendMsg := model.Message{ConversationID: convID, SenderID: c.UserID, MsgType: 1, Content: m.Content, ClientMsgID: m.ClientMsgID}
 	err = repository.CreateMessage(&sendMsg)
 	if err != nil {
@@ -193,6 +217,8 @@ func (c *Client) handleChatMsg(msg []byte) {
 		zap.L().Error("消息入库失败", zap.Error(err))
 		return
 	}
+
+	t4 = time.Now()
 	metrics.MessagesPersistedTotal.WithLabelValues("success").Inc()
 	// //更新会话表
 	// err = repository.UpdateConversation(convID, &sendMsg)
@@ -203,6 +229,7 @@ func (c *Client) handleChatMsg(msg []byte) {
 	// MQ生产端推送消息
 	mqMsg := &model.MqMessage{ConvID: convID, SendMsg: sendMsg}
 	mq.PublishWithFallback(mqMsg)
+	t5 = time.Now()
 
 	//把已读消息更新到自己发送的消息，自己发送的肯定是已读,要是出错了也没大事
 	err = repository.UpdateLastReadMsgID(convID, c.UserID, sendMsg.ID)
@@ -210,9 +237,10 @@ func (c *Client) handleChatMsg(msg []byte) {
 		zap.L().Error("尝试将已读消息更新为自己刚刚发送的消息ID,但是更新失败", zap.Error(err))
 		// continue
 	}
+	t6 = time.Now()
 
 	//消息序列化
-	collectMsg := CollectMessage{SenderID: c.UserID, ConversationID: convID, MsgID: sendMsg.ID, Content: m.Content}
+	collectMsg := CollectMessage{SenderID: c.UserID, ConversationID: convID, MsgID: sendMsg.ID, Content: m.Content, ClientMsgID: m.ClientMsgID}
 	collectMsgByte, err := json.Marshal(collectMsg)
 	if err != nil {
 		zap.L().Error("消息序列化失败", zap.Error(err))
@@ -223,17 +251,20 @@ func (c *Client) handleChatMsg(msg []byte) {
 	c.Manager.mu.RLock()
 	targetClient, ok := c.Manager.clients[m.ToUserID]
 	c.Manager.mu.RUnlock()
+	//记录压测日志的，看是投递的哪个路径
 	if !ok {
 		targetNodeID, err := GetOnlineNode(m.ToUserID)
 		if err != nil {
 			//redis查找失败
 			metrics.MessagesFailedTotal.WithLabelValues("redis_lookup_failed").Inc()
 			zap.L().Warn("查询在线状态失败,降级为离线消息", zap.Error(err))
+			deliveryPath = "offline"
 			return
 		}
 		if targetNodeID == "" {
 			metrics.MessagesDeliveredTotal.WithLabelValues("offline").Inc()
 			zap.L().Info("用户离线", zap.Uint("user_id", m.ToUserID))
+			deliveryPath = "offline"
 			return
 		} else if targetNodeID == node.GetNodeID() {
 			// 异常情况:Redis 说在自己实例,但本地 map 没有
@@ -243,6 +274,7 @@ func (c *Client) handleChatMsg(msg []byte) {
 			return
 		}
 		// 正常跨实例转发
+		deliveryPath = "cross_instance"
 		err = PublishForwardMsg(m.ToUserID, targetNodeID, collectMsgByte)
 		if err != nil {
 			metrics.MessagesFailedTotal.WithLabelValues("forward_publish_failed").Inc() // 跨实例失败
@@ -256,6 +288,7 @@ func (c *Client) handleChatMsg(msg []byte) {
 		return
 	}
 
+	deliveryPath = "local"
 	success := DeliverTotalMsg(targetClient, collectMsgByte)
 	if success {
 		zap.L().Info("消息发送成功", zap.Uint("sender_id", c.UserID), zap.Uint("to_id", m.ToUserID))
@@ -342,7 +375,6 @@ func (c *Client) pingLoop() {
 func (c *Client) DeliverMsg() {
 	// 起一个 goroutine 定时发 ping
 	go c.pingLoop()
-
 	for msg := range c.Send {
 		//把消息发送给用户
 		c.muWrite.Lock()
